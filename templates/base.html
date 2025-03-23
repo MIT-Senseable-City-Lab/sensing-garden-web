@@ -14,6 +14,7 @@
         :root {
             --sensing-garden-green: rgb(157, 194, 67);
             --sensing-garden-dark: rgb(50, 62, 21);
+            --sensing-garden-hover: rgb(137, 174, 47);
             --font-family-sans-serif: 'Instrument Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
         }
         
@@ -55,6 +56,7 @@
         .btn-primary,
         .btn-secondary,
         .btn-outline-primary,
+        .btn-success,
         .paginate_button.active .page-link {
             background-color: var(--sensing-garden-green) !important;
             border-color: var(--sensing-garden-green) !important;
@@ -65,14 +67,17 @@
         .btn-primary:hover, 
         .btn-secondary:hover,
         .btn-outline-primary:hover,
+        .btn-success:hover,
         .btn-primary:focus, 
         .btn-secondary:focus,
         .btn-outline-primary:focus,
+        .btn-success:focus,
         .btn-primary:active, 
         .btn-secondary:active,
-        .btn-outline-primary:active {
-            background-color: rgb(137, 174, 47) !important;
-            border-color: rgb(137, 174, 47) !important;
+        .btn-outline-primary:active,
+        .btn-success:active {
+            background-color: var(--sensing-garden-hover) !important;
+            border-color: var(--sensing-garden-hover) !important;
             color: #000 !important;
         }
         

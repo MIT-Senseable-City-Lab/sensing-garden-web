@@ -12,7 +12,7 @@ python-dotenv = "^1.0.0"
 json-schema-for-humans = "^0.47.0"
 gunicorn = "^21.2.0"
 requests = "^2.31.0"
-sensing-garden-client = "0.0.1"
+sensing-garden-client = "0.0.2"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.0.0"

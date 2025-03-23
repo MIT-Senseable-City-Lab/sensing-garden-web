@@ -8,11 +8,7 @@ from typing import Any, Dict, List, Optional
 from dotenv import load_dotenv
 from flask import (Flask, jsonify, make_response, redirect, render_template,
                    request, url_for)
-from sensing_garden_client import send_model_request
-# Import sensing garden client
-from sensing_garden_client.client import SensingGardenClient
-from sensing_garden_client.get_endpoints import (get_classifications,
-                                                 get_detections, get_models)
+from sensing_garden_client import SensingGardenClient
 
 # Load environment variables
 load_dotenv()
@@ -21,8 +17,8 @@ app = Flask(__name__)
 
 # Create client instance
 client = SensingGardenClient(
-    api_key=os.getenv('SENSING_GARDEN_API_KEY'),
-    base_url=os.getenv('API_BASE_URL')
+    base_url=os.getenv('API_BASE_URL'),
+    api_key=os.getenv('SENSING_GARDEN_API_KEY')
 )
 
 def fetch_data(table_type: str, device_id: Optional[str] = None, next_token: Optional[str] = None) -> Dict[str, Any]:
@@ -31,11 +27,22 @@ def fetch_data(table_type: str, device_id: Optional[str] = None, next_token: Opt
     limit: int = 50
     try:
         if table_type == 'detections':
-            response = get_detections(client, device_id=device_id, limit=limit, next_token=next_token)
+            response = client.detections.fetch(
+                device_id=device_id,
+                limit=limit,
+                next_token=next_token
+            )
         elif table_type == 'classifications':
-            response = get_classifications(client, device_id=device_id, limit=limit, next_token=next_token)
+            response = client.classifications.fetch(
+                device_id=device_id,
+                limit=limit,
+                next_token=next_token
+            )
         elif table_type == 'models':
-            response = get_models(client, limit=limit, next_token=next_token)
+            response = client.models.fetch(
+                limit=limit,
+                next_token=next_token
+            )
         else:
             return {'items': [], 'next_token': None}
         
@@ -76,20 +83,47 @@ def index():
 
 @app.route('/view_device/<device_id>')
 def view_device(device_id):
-    # Fetch detection and classification content for the selected device
-    detection_result = fetch_data('detections', device_id=device_id)
-    classification_result = fetch_data('classifications', device_id=device_id)
+    """View device content with pagination"""
+    # Get pagination token from request if available
+    next_token = request.args.get('next_token', None)
+    prev_token = request.args.get('prev_token', None)
     
-    # Get field names directly from the data
-    detection_fields = get_field_names(detection_result['items'])
-    classification_fields = get_field_names(classification_result['items'])
+    # Track page tokens for Previous button
+    token_history = request.args.get('token_history', '')
     
-    return render_template('device_content.html', 
-                           device_id=device_id, 
-                           detections=detection_result['items'],
-                           classifications=classification_result['items'],
-                           detection_fields=detection_fields,
-                           classification_fields=classification_fields)
+    try:
+        # Fetch detection and classification content for the selected device
+        detection_response = client.detections.fetch(
+            device_id=device_id,
+            limit=50,
+            next_token=next_token
+        )
+        classification_response = client.classifications.fetch(
+            device_id=device_id,
+            limit=50,
+            next_token=next_token
+        )
+        
+        # Get field names directly from the data
+        detection_fields = []
+        classification_fields = []
+        
+        if detection_response.get('items'):
+            detection_fields = list(detection_response['items'][0].keys())
+        if classification_response.get('items'):
+            classification_fields = list(classification_response['items'][0].keys())
+        
+        return render_template('device_content.html', 
+                               device_id=device_id, 
+                               detections=detection_response['items'],
+                               classifications=classification_response['items'],
+                               detection_fields=detection_fields,
+                               classification_fields=classification_fields,
+                               next_token=detection_response.get('next_token'),  # Use detection token as primary
+                               prev_token=prev_token,
+                               token_history=token_history)
+    except Exception as e:
+        return render_template('error.html', error=str(e))
 
 @app.route('/view_device/<device_id>/detections')
 def view_device_detections(device_id):
@@ -222,61 +256,45 @@ def view_device_classifications(device_id):
 
 @app.route('/view_models')
 def view_models():
-    # Get pagination token from request if available
-    next_token = request.args.get('next_token', None)
-    prev_token = request.args.get('prev_token', None)
-    
-    # Track page tokens for Previous button
-    token_history = request.args.get('token_history', '')
-    current_page = int(request.args.get('page', '1'))
-    
-    # Process token history
-    token_list = token_history.split(',') if token_history else []
-    
-    # Directly fetch models data with pagination
-    result = fetch_data('models', next_token=next_token)
-    fields = get_field_names(result['items'])
-    
-    # Handle special case for models - map 'id' to 'model_id' for backwards compatibility
-    for item in result['items']:
-        if 'id' in item and 'model_id' not in item:
-            item['model_id'] = item['id']
-            
-    # Update token history if moving forward and we have items
-    if next_token and next_token not in token_list and result['items']:
-        if current_page > len(token_list):
-            token_list.append(next_token)
-    
-    # Get previous token (if we're not on the first page)
-    prev_url = None
-    if current_page > 1:
-        if current_page == 2:  # Going back to first page
-            prev_url = url_for('view_models', page=1)
-        else:  # Going back to previous page
-            prev_token = token_list[current_page-3] if current_page > 2 and len(token_list) >= current_page-2 else None
-            prev_url = url_for('view_models', 
-                              next_token=prev_token,
-                              token_history=','.join(token_list[:current_page-2]),
-                              page=current_page-1)
-    
-    # Generate pagination URLs
-    next_page_token = result['next_token']
-    pagination = {
-        'has_next': next_page_token is not None,
-        'next_url': url_for('view_models', 
-                           next_token=next_page_token,
-                           token_history=','.join(token_list),
-                           page=current_page+1) if next_page_token else None,
-        'has_prev': current_page > 1,
-        'prev_url': prev_url
-    }
-    
-    return render_template('models.html', 
-                          items=result['items'], 
-                          fields=fields,
-                          pagination=pagination)
+    """View all models with pagination"""
+    try:
+        # Fetch models with pagination
+        models_response = client.models.fetch(
+            limit=50,
+            next_token=request.args.get('next_token')
+        )
+        
+        # Handle the case where there are no models
+        if not models_response.get('items'):
+            # Return the models template with empty data
+            return render_template('models.html',
+                                  models=[],
+                                  field_names=[],
+                                  next_token=None,
+                                  prev_token=None,
+                                  token_history='')
+        
+        # Get field names from the first model
+        field_names = list(models_response['items'][0].keys())
+        
+        return render_template('models.html',
+                               models=models_response['items'],
+                               field_names=field_names,
+                               next_token=models_response.get('next_token'),
+                               prev_token=request.args.get('prev_token'),
+                               token_history=request.args.get('token_history', ''))
+    except Exception as e:
+        print(f"Error in view_models: {e}")  # Log the error
+        # Still render the models template with empty data and an error message
+        return render_template('models.html',
+                              models=[],
+                              field_names=[],
+                              next_token=None,
+                              prev_token=None,
+                              token_history='',
+                              error=str(e))
 
-@app.route('/<table_type>')
+@app.route('/view_table/<table_type>')
 def view_table(table_type):
     """Generic route handler for viewing any table with pagination"""
     # Only allow known table types
@@ -345,110 +363,123 @@ def view_table(table_type):
 def models():
     return view_models()
 
-@app.route('/item/<table_type>/<device_id>/<timestamp>')
-def view_item(table_type, device_id, timestamp):
-    # Try to fetch the individual item
-    if table_type == 'models':
-        item = get_model(device_id)
-    elif table_type == 'detections':
-        item = get_detection(device_id, timestamp)
-    elif table_type == 'classifications':
-        item = get_classification(device_id, timestamp)
-    else:
-        return "Invalid table type", 404
-    
-    # Get field names directly from the item
-    fields = list(item.keys()) if item else []
-    
-    return render_template('item_detail.html', 
-                          item=item, 
-                          table_name=table_type,
-                          fields=fields,
-                          json_item=json.dumps(item, indent=2))
+@app.route('/item/<table_type>/<timestamp>')
+def view_item(table_type, timestamp):
+    """View individual item details"""
+    try:
+        # Try to fetch the individual item
+        if table_type == 'models':
+            item = client.models.get(timestamp)
+        elif table_type == 'detections':
+            device_id = request.args.get('device_id')
+            if not device_id:
+                return jsonify({'error': 'device_id is required for detections'}), 400
+            item = client.detections.get(device_id, timestamp)
+        elif table_type == 'classifications':
+            device_id = request.args.get('device_id')
+            if not device_id:
+                return jsonify({'error': 'device_id is required for classifications'}), 400
+            item = client.classifications.get(device_id, timestamp)
+        else:
+            return jsonify({'error': 'Invalid table type'}), 404
+        
+        if not item:
+            return jsonify({'error': 'Item not found'}), 404
+        
+        # Get field names directly from the item
+        fields = list(item.keys())
+        
+        return render_template('item_detail.html', 
+                               item=item, 
+                               table_name=table_type,
+                               fields=fields,
+                               json_item=json.dumps(item, indent=2))
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
-@app.route('/download_csv/<table_type>', defaults={'device_id': None})
-@app.route('/download_csv/<table_type>/<device_id>')
-def download_csv(table_type, device_id):
+@app.route('/download/<table_type>')
+def download_csv(table_type):
     """Download table data as CSV"""
-    if table_type not in ['detections', 'classifications', 'models']:
-        return redirect(url_for('index'))
+    try:
+        # Fetch all data without pagination
+        if table_type == 'detections':
+            device_id = request.args.get('device_id')
+            if not device_id:
+                return jsonify({'error': 'device_id is required for detections'}), 400
+            response = client.detections.fetch(
+                device_id=device_id,
+                limit=1000  # Fetch more data for download
+            )
+        elif table_type == 'classifications':
+            device_id = request.args.get('device_id')
+            if not device_id:
+                return jsonify({'error': 'device_id is required for classifications'}), 400
+            response = client.classifications.fetch(
+                device_id=device_id,
+                limit=1000  # Fetch more data for download
+            )
+        elif table_type == 'models':
+            response = client.models.fetch(
+                limit=1000  # Fetch more data for download
+            )
+        else:
+            return jsonify({'error': 'Invalid table type'}), 400
+        
+        items = response.get('items', [])
+        if not items:
+            return jsonify({'error': 'No data found'}), 404
+        
+        # Get field names from the first item
+        field_names = list(items[0].keys())
+        
+        # Create CSV output
+        output = io.StringIO()
+        writer = csv.DictWriter(output, fieldnames=field_names)
+        writer.writeheader()
+        writer.writerows(items)
+        
+        # Create response
+        response = make_response(output.getvalue())
+        response.headers['Content-Type'] = 'text/csv'
+        if table_type == 'models':
+            response.headers['Content-Disposition'] = f'attachment; filename=models.csv'
+        else:
+            response.headers['Content-Disposition'] = f'attachment; filename={table_type}_{device_id}.csv'
+        return response
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
-    result = fetch_data(table_type, device_id=device_id)
-    items = result['items']
-
-    if not items:
-        return "No data available", 404
-
-    # Get all possible fieldnames
-    fieldnames = set()
-    for item in items:
-        fieldnames.update(item.keys())
-    fieldnames = sorted(fieldnames)
-
-    csv_data = io.StringIO()
-    writer = csv.DictWriter(csv_data, fieldnames=fieldnames, extrasaction='ignore')
-    writer.writeheader()
-    
-    for item in items:
-        # Flatten nested structures
-        flat_item = {}
-        for key, value in item.items():
-            if isinstance(value, (dict, list)):
-                flat_item[key] = json.dumps(value)
-            else:
-                flat_item[key] = value
-        writer.writerow(flat_item)
-
-    response = make_response(csv_data.getvalue())
-    file_name = f"{table_type}_{device_id}_{datetime.now().isoformat()}.csv" if device_id else f"{table_type}_{datetime.now().isoformat()}.csv"
-    response.headers['Content-Disposition'] = f'attachment; filename={file_name}'
-    response.headers['Content-Type'] = 'text/csv'
-    return response
-
-@app.route('/add_model')
+@app.route('/add_model', methods=['GET'])
 def add_model():
     """Show the form to add a new model"""
     return render_template('add_model.html')
 
-@app.route('/add_model/submit', methods=['POST'])
+@app.route('/add_model', methods=['POST'])
 def add_model_submit():
     """Process the model addition form submission"""
     try:
-        # Get JSON data from request
-        data = request.json
+        # Get form data
+        model_data = {
+            'model_id': request.form['model_id'],
+            'name': request.form['name'],
+            'version': request.form['version'],
+            'description': request.form.get('description', '')
+        }
         
-        # Extract fields from the request
-        model_id = data.get('model_id')
-        device_id = data.get('device_id')
-        name = data.get('name')
-        version = data.get('version')
-        description = data.get('description', '')
-        metadata = data.get('metadata')
-        timestamp = data.get('timestamp')
+        # Add metadata if provided
+        metadata = request.form.get('metadata')
+        if metadata:
+            try:
+                model_data['metadata'] = json.loads(metadata)
+            except json.JSONDecodeError:
+                return render_template('add_model.html', error="Invalid JSON format for metadata")
         
-        # Validate required fields
-        if not all([model_id, device_id, name, version]):
-            return jsonify({'error': 'Missing required fields'}), 400
+        # Create the model using the new API
+        model = client.models.create(**model_data)
         
-        # Call the API to add the model
-        response = send_model_request(
-            client=client,
-            model_id=model_id,
-            device_id=device_id,
-            name=name,
-            version=version,
-            description=description,
-            metadata=metadata,
-            timestamp=timestamp
-        )
-        
-        return jsonify({'success': True, 'model': response})
-    
-    except ValueError as e:
-        return jsonify({'error': str(e)}), 400
+        return redirect(url_for('view_models'))
     except Exception as e:
-        print(f"Error adding model: {str(e)}")
-        return jsonify({'error': 'Failed to add model'}), 500
+        return render_template('add_model.html', error=str(e))
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5052)
