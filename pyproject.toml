@@ -1,0 +1,22 @@
+[tool.poetry]
+name = "sensing-garden-web"
+version = "0.1.0"
+description = "Flask dashboard for Sensing Garden"
+authors = ["Deniz Aydemir <deniz@aydemir.us>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.9"
+flask = "^3.1.0"
+python-dotenv = "^1.0.0"
+json-schema-for-humans = "^0.47.0"
+gunicorn = "^21.2.0"
+requests = "^2.31.0"
+sensing-garden-client = "0.0.1"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.0.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

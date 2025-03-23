@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "5052:5052"
+    environment:
+      - FLASK_APP=app.py
+      - FLASK_ENV=production
+      - SENSING_GARDEN_API_KEY=${SENSING_GARDEN_API_KEY}
+      - API_BASE_URL=${API_BASE_URL}
+    volumes:
+      - .:/app
+    command: ["gunicorn", "--bind", "0.0.0.0:5052", "--timeout", "120", "app:app"]
