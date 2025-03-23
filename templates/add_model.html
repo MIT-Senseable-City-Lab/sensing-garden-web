@@ -33,13 +33,6 @@
             <small class="form-text text-muted">Optional description of the model</small>
         </div>
         
-        <div class="form-group mb-3">
-            <label for="metadata">Metadata (JSON)</label>
-            <textarea class="form-control" id="metadata" name="metadata" rows="3"></textarea>
-            <div class="invalid-feedback" id="metadata-feedback">Invalid JSON format</div>
-            <small class="form-text text-muted">Optional metadata in JSON format</small>
-        </div>
-        
         <button type="submit" class="btn btn-primary">Add Model</button>
         <a href="{{ url_for('view_models') }}" class="btn btn-secondary">Cancel</a>
     </form>
@@ -78,25 +71,10 @@ document.getElementById('add-model-form').addEventListener('submit', function(e)
         return;
     }
 
-    // Get form data
-    const formData = new FormData(this);
-    const metadata = formData.get('metadata');
-    
-    // Validate metadata if provided
-    let metadataJson = null;
-    if (metadata) {
-        try {
-            metadataJson = JSON.parse(metadata);
-        } catch (e) {
-            document.getElementById('metadata-feedback').style.display = 'block';
-            return;
-        }
-    }
-
     // Submit form
     fetch('/add_model', {
         method: 'POST',
-        body: formData
+        body: new FormData(this)
     })
     .then(response => {
         if (response.ok) {

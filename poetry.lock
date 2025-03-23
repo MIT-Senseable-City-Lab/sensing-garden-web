@@ -635,13 +635,13 @@ use-chardet-on-py3 = ["chardet (>=3.0.2,<6)"]
 
 [[package]]
 name = "sensing-garden-client"
-version = "0.0.2"
+version = "0.0.3"
 description = "Sensing Garden Client for API interaction"
 optional = false
 python-versions = ">=3.8"
 files = [
-    {file = "sensing_garden_client-0.0.2-py3-none-any.whl", hash = "sha256:4d4b7856e3d8d83b9211e5669ad4b28658323779cefb34c6821a14746a2ef986"},
-    {file = "sensing_garden_client-0.0.2.tar.gz", hash = "sha256:c4b3e2cdf9ecb35f881b756a9029bf716b1fefbd4b82fb96644c3a3ac3eba418"},
+    {file = "sensing_garden_client-0.0.3-py3-none-any.whl", hash = "sha256:d045cd6028fc096bbbe6951401a45cd60c3904e8c065ddbf9f44f38df3dfaa47"},
+    {file = "sensing_garden_client-0.0.3.tar.gz", hash = "sha256:2b973c9ad2f097f21451bbe3d83ad3ab00726b14b5e6233c392aab32ef7c705b"},
 ]
 
 [package.dependencies]
@@ -770,4 +770,4 @@ type = ["pytest-mypy"]
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.9"
-content-hash = "08734897bb9cda558ed4282b6de9b0c8a7cc66ccfc107d6f98058a77642158fe"
+content-hash = "31fdb7d2af1bc121846b4591fc61b0c81398e8e1ee8b1091b4769f09296ddf25"
