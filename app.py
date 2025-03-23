@@ -3,16 +3,16 @@ import io
 import json
 import os
 from datetime import datetime
-from typing import Dict, List, Optional, Any
+from typing import Any, Dict, List, Optional
 
 from dotenv import load_dotenv
-from flask import (Flask, make_response, redirect, render_template, request,
-                   url_for, jsonify)
-
+from flask import (Flask, jsonify, make_response, redirect, render_template,
+                   request, url_for)
+from sensing_garden_client import send_model_request
 # Import sensing garden client
 from sensing_garden_client.client import SensingGardenClient
-from sensing_garden_client.get_endpoints import get_detections, get_classifications, get_models
-from sensing_garden_client import send_model_request
+from sensing_garden_client.get_endpoints import (get_classifications,
+                                                 get_detections, get_models)
 
 # Load environment variables
 load_dotenv()
