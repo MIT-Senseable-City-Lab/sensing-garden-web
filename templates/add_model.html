@@ -1,0 +1,171 @@
+{% extends "base.html" %}
+
+{% block title %}Sensing Garden Dashboard - Add New Model{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <h2>Add New Model</h2>
+    <form id="add-model-form" class="needs-validation" novalidate>
+        <div class="form-group mb-3">
+            <label for="model_id">Model ID*</label>
+            <input type="text" class="form-control" id="model_id" name="model_id" required>
+            <div class="invalid-feedback">Model ID is required</div>
+            <small class="form-text text-muted">Unique identifier for the model (required)</small>
+        </div>
+        
+        <div class="form-group mb-3">
+            <label for="device_id">Device ID*</label>
+            <input type="text" class="form-control" id="device_id" name="device_id" required>
+            <div class="invalid-feedback">Device ID is required</div>
+            <small class="form-text text-muted">Unique identifier for the device (required)</small>
+        </div>
+        
+        <div class="form-group mb-3">
+            <label for="name">Model Name*</label>
+            <input type="text" class="form-control" id="name" name="name" required>
+            <div class="invalid-feedback">Model name is required</div>
+            <small class="form-text text-muted">Name of the model (required)</small>
+        </div>
+        
+        <div class="form-group mb-3">
+            <label for="version">Version*</label>
+            <input type="text" class="form-control" id="version" name="version" required>
+            <div class="invalid-feedback">Version is required</div>
+            <small class="form-text text-muted">Version string for the model (required)</small>
+        </div>
+        
+        <div class="form-group mb-3">
+            <label for="description">Description</label>
+            <textarea class="form-control" id="description" name="description" rows="3"></textarea>
+            <small class="form-text text-muted">Optional description of the model</small>
+        </div>
+        
+        <div class="form-group mb-3">
+            <label for="metadata">Metadata (JSON)</label>
+            <textarea class="form-control" id="metadata" name="metadata" rows="3"></textarea>
+            <div class="invalid-feedback" id="metadata-feedback">Invalid JSON format</div>
+            <small class="form-text text-muted">Optional metadata in JSON format</small>
+        </div>
+        
+        <div class="form-group mb-3">
+            <label for="timestamp">Timestamp</label>
+            <input type="datetime-local" class="form-control" id="timestamp" name="timestamp">
+            <small class="form-text text-muted">Optional timestamp (if empty, current time will be used)</small>
+        </div>
+        
+        <div class="d-flex justify-content-between align-items-center mt-4">
+            <a href="{{ url_for('models') }}" class="btn btn-secondary">Cancel</a>
+            <button type="submit" class="btn btn-primary">Submit</button>
+        </div>
+    </form>
+    
+    <!-- Spinner overlay for loading state -->
+    <div id="loading-overlay" class="position-fixed top-0 start-0 w-100 h-100 bg-dark bg-opacity-50 d-flex justify-content-center align-items-center" style="display: none !important; z-index: 9999;">
+        <div class="spinner-border text-light" role="status" style="width: 3rem; height: 3rem;">
+            <span class="visually-hidden">Loading...</span>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const form = document.getElementById('add-model-form');
+        const metadataField = document.getElementById('metadata');
+        const loadingOverlay = document.getElementById('loading-overlay');
+        
+        // Generate and fill UUID for model_id field
+        function generateUUID() {
+            // RFC4122 version 4 compliant UUID
+            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+                var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+                return v.toString(16);
+            });
+        }
+        
+        // Set UUID to model_id field if it's empty
+        const modelIdField = document.getElementById('model_id');
+        if (!modelIdField.value) {
+            modelIdField.value = generateUUID();
+        }
+        
+        // Validate metadata JSON format
+        metadataField.addEventListener('blur', function() {
+            if (this.value.trim() !== '') {
+                try {
+                    JSON.parse(this.value);
+                    this.classList.remove('is-invalid');
+                } catch (e) {
+                    this.classList.add('is-invalid');
+                }
+            } else {
+                this.classList.remove('is-invalid');
+            }
+        });
+        
+        // Form submission
+        form.addEventListener('submit', function(event) {
+            event.preventDefault();
+            
+            // First check standard validation
+            if (!form.checkValidity()) {
+                event.stopPropagation();
+                form.classList.add('was-validated');
+                return;
+            }
+            
+            // Validate metadata separately if not empty
+            if (metadataField.value.trim() !== '') {
+                try {
+                    JSON.parse(metadataField.value);
+                } catch (e) {
+                    metadataField.classList.add('is-invalid');
+                    return;
+                }
+            }
+            
+            // Prepare data object
+            const formData = {
+                model_id: document.getElementById('model_id').value,
+                device_id: document.getElementById('device_id').value,
+                name: document.getElementById('name').value,
+                version: document.getElementById('version').value,
+                description: document.getElementById('description').value || '',
+                metadata: metadataField.value ? JSON.parse(metadataField.value) : null,
+                timestamp: document.getElementById('timestamp').value || null
+            };
+            
+            // Show loading spinner
+            loadingOverlay.style.display = 'flex';
+            
+            // Send AJAX request
+            fetch('{{ url_for("add_model_submit") }}', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(formData)
+            })
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().then(data => {
+                        throw new Error(data.error || 'Failed to add model');
+                    });
+                }
+                return response.json();
+            })
+            .then(data => {
+                // Success - redirect to models page
+                window.location.href = '{{ url_for("models") }}';
+            })
+            .catch(error => {
+                // Hide loading spinner
+                loadingOverlay.style.display = 'none';
+                // Show error
+                alert('Error: ' + error.message);
+            });
+        });
+    });
+</script>
+{% endblock %}

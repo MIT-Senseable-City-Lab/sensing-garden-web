@@ -7,11 +7,12 @@ from typing import Dict, List, Optional, Any
 
 from dotenv import load_dotenv
 from flask import (Flask, make_response, redirect, render_template, request,
-                   url_for)
+                   url_for, jsonify)
 
 # Import sensing garden client
 from sensing_garden_client.client import SensingGardenClient
 from sensing_garden_client.get_endpoints import get_detections, get_classifications, get_models
+from sensing_garden_client import send_model_request
 
 # Load environment variables
 load_dotenv()
@@ -392,6 +393,51 @@ def download_csv(table_type, device_id):
     response.headers['Content-Disposition'] = f'attachment; filename={file_name}'
     response.headers['Content-Type'] = 'text/csv'
     return response
+
+@app.route('/add_model')
+def add_model():
+    """Show the form to add a new model"""
+    return render_template('add_model.html')
+
+@app.route('/add_model/submit', methods=['POST'])
+def add_model_submit():
+    """Process the model addition form submission"""
+    try:
+        # Get JSON data from request
+        data = request.json
+        
+        # Extract fields from the request
+        model_id = data.get('model_id')
+        device_id = data.get('device_id')
+        name = data.get('name')
+        version = data.get('version')
+        description = data.get('description', '')
+        metadata = data.get('metadata')
+        timestamp = data.get('timestamp')
+        
+        # Validate required fields
+        if not all([model_id, device_id, name, version]):
+            return jsonify({'error': 'Missing required fields'}), 400
+        
+        # Call the API to add the model
+        response = send_model_request(
+            client=client,
+            model_id=model_id,
+            device_id=device_id,
+            name=name,
+            version=version,
+            description=description,
+            metadata=metadata,
+            timestamp=timestamp
+        )
+        
+        return jsonify({'success': True, 'model': response})
+    
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        print(f"Error adding model: {str(e)}")
+        return jsonify({'error': 'Failed to add model'}), 500
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5052)

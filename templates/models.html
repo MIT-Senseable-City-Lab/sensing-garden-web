@@ -6,7 +6,10 @@
 
 {% block content %}
 <div class="container">
-    <h2>Models</h2>
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h2>Models</h2>
+        <a href="{{ url_for('add_model') }}" class="btn btn-primary">New Model</a>
+    </div>
     {% set display_fields = fields + ['formatted_time'] if 'formatted_time' not in fields else fields %}
     {% set adjusted_fields = display_fields | reject('equalto', 'id') | list %}
     {% if 'model_id' not in adjusted_fields %}
