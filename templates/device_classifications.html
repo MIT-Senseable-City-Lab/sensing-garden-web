@@ -9,10 +9,11 @@
     <h2>Device {{ device_id }} Classifications</h2>
     {% set display_fields = fields + ['formatted_time'] if 'formatted_time' not in fields else fields %}
     {{ render_table('classificationsTable', classifications, display_fields,
-    url_for('download_csv', table_type='classifications', device_id=device_id), pagination) }}
+    url_for('download_csv', table_type='classifications', device_id=device_id), pagination,
+    request.args.get('sort_by'), request.args.get('sort_order')) }}
 </div>
 {% endblock %}
 
 {% block scripts %}
-    {{ table_scripts('classificationsTable') }}
+{{ table_scripts('classificationsTable') }}
 {% endblock %}

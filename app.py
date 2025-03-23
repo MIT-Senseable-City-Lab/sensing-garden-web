@@ -21,8 +21,8 @@ client = SensingGardenClient(
     api_key=os.getenv('SENSING_GARDEN_API_KEY')
 )
 
-def fetch_data(table_type: str, device_id: Optional[str] = None, next_token: Optional[str] = None) -> Dict[str, Any]:
-    """Fetch data from the API for a specific table type with pagination support"""
+def fetch_data(table_type: str, device_id: Optional[str] = None, next_token: Optional[str] = None, sort_by: Optional[str] = None, sort_desc: Optional[bool] = False) -> Dict[str, Any]:
+    """Fetch data from the API for a specific table with pagination support"""
     # Hardcoded limit of 50 items per page
     limit: int = 50
     try:
@@ -30,18 +30,24 @@ def fetch_data(table_type: str, device_id: Optional[str] = None, next_token: Opt
             response = client.detections.fetch(
                 device_id=device_id,
                 limit=limit,
-                next_token=next_token
+                next_token=next_token,
+                sort_by=sort_by,
+                sort_desc=sort_desc
             )
         elif table_type == 'classifications':
             response = client.classifications.fetch(
                 device_id=device_id,
                 limit=limit,
-                next_token=next_token
+                next_token=next_token,
+                sort_by=sort_by,
+                sort_desc=sort_desc
             )
         elif table_type == 'models':
             response = client.models.fetch(
                 limit=limit,
-                next_token=next_token
+                next_token=next_token,
+                sort_by=sort_by,
+                sort_desc=sort_desc
             )
         else:
             return {'items': [], 'next_token': None}
@@ -138,9 +144,13 @@ def view_device_detections(device_id):
     # Process token history
     token_list = token_history.split(',') if token_history else []
     
-    # Fetch detection content for the selected device with pagination
-    result = fetch_data('detections', device_id=device_id, next_token=next_token)
-    print(f"Fetched detections for device {device_id}, next_token: {next_token}, page: {current_page}")
+    # Get sort parameters
+    sort_by = request.args.get('sort_by', None)
+    sort_desc = request.args.get('sort_desc', 'false') == 'true'
+    
+    # Fetch detection content for the selected device with pagination and sorting
+    result = fetch_data('detections', device_id=device_id, next_token=next_token, sort_by=sort_by, sort_desc=sort_desc)
+    print(f"Fetched detections for device {device_id}, next_token: {next_token}, page: {current_page}, sort_by: {sort_by}, sort_desc: {sort_desc}")
     
     # Get field names directly from the data
     fields = get_field_names(result['items'])
@@ -197,15 +207,19 @@ def view_device_classifications(device_id):
     # Process token history
     token_list = token_history.split(',') if token_history else []
     
-    # Fetch classification content for the selected device with pagination
-    result = fetch_data('classifications', device_id=device_id, next_token=next_token)
-    print(f"Fetched classifications for device {device_id}, next_token: {next_token}, page: {current_page}")
+    # Get sort parameters
+    sort_by = request.args.get('sort_by', None)
+    sort_desc = request.args.get('sort_desc', 'false') == 'true'
+    
+    # Fetch classification content for the selected device with pagination and sorting
+    result = fetch_data('classifications', device_id=device_id, next_token=next_token, sort_by=sort_by, sort_desc=sort_desc)
+    print(f"Fetched classifications for device {device_id}, next_token: {next_token}, page: {current_page}, sort_by: {sort_by}, sort_desc: {sort_desc}")
     
     # If we got empty results but we're using a next_token, try without the token
     # This handles the case where the token might be expired or invalid
     if not result['items'] and next_token and current_page > 1:
         print(f"No items found with token, trying without token for page {current_page}")
-        result = fetch_data('classifications', device_id=device_id)
+        result = fetch_data('classifications', device_id=device_id, sort_by=sort_by, sort_desc=sort_desc)
     
     # Get field names directly from the data
     fields = get_field_names(result['items'])
@@ -254,19 +268,33 @@ def view_device_classifications(device_id):
                            fields=fields,
                            pagination=pagination)
 
-@app.route('/view_models')
-def view_models():
-    """View all models with pagination"""
+@app.route('/view_table/<table_type>')
+def view_table(table_type):
+    """Generic route handler for viewing any table with pagination and sorting"""
+    if table_type not in ['detections', 'classifications', 'models']:
+        return redirect(url_for('index'))
+    
+    # For detections and classifications, redirect to device-specific view
+    if table_type in ['detections', 'classifications']:
+        device_id = request.args.get('device_id')
+        if not device_id:
+            return redirect(url_for('index'))
+        return redirect(url_for(f'view_device_{table_type}', device_id=device_id))
+    
+    # For models, handle directly
     try:
-        # Fetch models with pagination
+        # Fetch models with pagination and sorting
+        sort_by = request.args.get('sort_by')
+        sort_desc = request.args.get('sort_desc', 'false') == 'true'
         models_response = client.models.fetch(
             limit=50,
-            next_token=request.args.get('next_token')
+            next_token=request.args.get('next_token'),
+            sort_by=sort_by,
+            sort_desc=sort_desc
         )
         
         # Handle the case where there are no models
         if not models_response.get('items'):
-            # Return the models template with empty data
             return render_template('models.html',
                                   models=[],
                                   field_names=[],
@@ -277,15 +305,20 @@ def view_models():
         # Get field names from the first model
         field_names = list(models_response['items'][0].keys())
         
+        # Get sort parameters for template
+        sort_by = request.args.get('sort_by')
+        sort_desc = request.args.get('sort_desc', 'false') == 'true'
+        
         return render_template('models.html',
-                               models=models_response['items'],
-                               field_names=field_names,
-                               next_token=models_response.get('next_token'),
-                               prev_token=request.args.get('prev_token'),
-                               token_history=request.args.get('token_history', ''))
+                              models=models_response['items'],
+                              field_names=field_names,
+                              next_token=models_response.get('next_token'),
+                              prev_token=request.args.get('prev_token'),
+                              token_history=request.args.get('token_history', ''),
+                              sort_by=sort_by,
+                              sort_desc=sort_desc)
     except Exception as e:
-        print(f"Error in view_models: {e}")  # Log the error
-        # Still render the models template with empty data and an error message
+        print(f"Error in view_table: {e}")
         return render_template('models.html',
                               models=[],
                               field_names=[],
@@ -293,75 +326,6 @@ def view_models():
                               prev_token=None,
                               token_history='',
                               error=str(e))
-
-@app.route('/view_table/<table_type>')
-def view_table(table_type):
-    """Generic route handler for viewing any table with pagination"""
-    # Only allow known table types
-    if table_type not in ['detections', 'classifications', 'models']:
-        return redirect(url_for('index'))
-    
-    # Get pagination token from request if available
-    next_token = request.args.get('next_token', None)
-    prev_token = request.args.get('prev_token', None)
-    
-    # Track page tokens for Previous button
-    token_history = request.args.get('token_history', '')
-    current_page = int(request.args.get('page', '1'))
-    
-    # Process token history
-    token_list = token_history.split(',') if token_history else []
-    
-    # Fetch data with pagination
-    result = fetch_data(table_type, next_token=next_token)
-    fields = get_field_names(result['items'])
-    
-    # Handle special case for models - map 'id' to 'model_id' for backwards compatibility
-    if table_type == 'models':
-        for item in result['items']:
-            if 'id' in item and 'model_id' not in item:
-                item['model_id'] = item['id']
-                
-    # Update token history if moving forward and we have items
-    if next_token and next_token not in token_list and result['items']:
-        if current_page > len(token_list):
-            token_list.append(next_token)
-    
-    # Get previous token (if we're not on the first page)
-    prev_url = None
-    if current_page > 1:
-        if current_page == 2:  # Going back to first page
-            prev_url = url_for('view_table', table_type=table_type, page=1)
-        else:  # Going back to previous page
-            prev_token = token_list[current_page-3] if current_page > 2 and len(token_list) >= current_page-2 else None
-            prev_url = url_for('view_table', 
-                              table_type=table_type,
-                              next_token=prev_token,
-                              token_history=','.join(token_list[:current_page-2]),
-                              page=current_page-1)
-    
-    # Generate pagination URLs
-    next_page_token = result['next_token']
-    pagination = {
-        'has_next': next_page_token is not None,
-        'next_url': url_for('view_table', 
-                           table_type=table_type,
-                           next_token=next_page_token,
-                           token_history=','.join(token_list),
-                           page=current_page+1) if next_page_token else None,
-        'has_prev': current_page > 1,
-        'prev_url': prev_url
-    }
-    
-    return render_template(f'{table_type}.html', 
-                          items=result['items'], 
-                          fields=fields,
-                          pagination=pagination)
-
-# For backward compatibility, keep the specific routes
-@app.route('/models')
-def models():
-    return view_models()
 
 @app.route('/item/<table_type>/<timestamp>')
 def view_item(table_type, timestamp):
@@ -477,7 +441,7 @@ def add_model_submit():
         # Create the model using the new API
         model = client.models.create(**model_data)
         
-        return redirect(url_for('view_models'))
+        return redirect(url_for('view_table', table_type='models'))
     except Exception as e:
         return render_template('add_model.html', error=str(e))
 

@@ -7,12 +7,16 @@
 {% block content %}
 <div class="container">
     <h2>Device {{ device_id }} Detections</h2>
-    {% set display_fields = fields + ['formatted_time'] if 'formatted_time' not in fields else fields %}
+    {% if detections %}
+    {% set display_fields = detections[0].keys()|sort %}
     {{ render_table('detectionsTable', detections, display_fields,
-    url_for('download_csv', table_type='detections', device_id=device_id), pagination) }}
+    url_for('download_csv', table_type='detections', device_id=device_id), pagination,
+    request.args.get('sort_by'), request.args.get('sort_order')) }}
+    {% else %}
+    {% endif %}
 </div>
 {% endblock %}
 
 {% block scripts %}
-    {{ table_scripts('detectionsTable') }}
+{{ table_scripts('detectionsTable') }}
 {% endblock %}
