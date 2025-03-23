@@ -113,8 +113,8 @@ def view_device_detections(device_id):
     if 'formatted_time' not in fields and 'timestamp' in fields:
         fields.append('formatted_time')  # Add formatted_time for display purposes
     
-    # Update token history if moving forward
-    if next_token and next_token not in token_list:
+    # Update token history if moving forward and we have items
+    if next_token and next_token not in token_list and result['items']:
         if current_page > len(token_list):
             token_list.append(next_token)
     
@@ -167,13 +167,19 @@ def view_device_classifications(device_id):
     result = fetch_data('classifications', device_id=device_id, next_token=next_token)
     print(f"Fetched classifications for device {device_id}, next_token: {next_token}, page: {current_page}")
     
+    # If we got empty results but we're using a next_token, try without the token
+    # This handles the case where the token might be expired or invalid
+    if not result['items'] and next_token and current_page > 1:
+        print(f"No items found with token, trying without token for page {current_page}")
+        result = fetch_data('classifications', device_id=device_id)
+    
     # Get field names directly from the data
     fields = get_field_names(result['items'])
     if 'formatted_time' not in fields and 'timestamp' in fields:
         fields.append('formatted_time')  # Add formatted_time for display purposes
     
-    # Update token history if moving forward
-    if next_token and next_token not in token_list:
+    # Update token history if moving forward and we have items
+    if next_token and next_token not in token_list and result['items']:
         if current_page > len(token_list):
             token_list.append(next_token)
     
@@ -183,12 +189,17 @@ def view_device_classifications(device_id):
         if current_page == 2:  # Going back to first page
             prev_url = url_for('view_device_classifications', device_id=device_id, page=1)
         else:  # Going back to previous page
-            prev_token = token_list[current_page-3] if current_page > 2 and len(token_list) >= current_page-2 else None
-            prev_url = url_for('view_device_classifications', 
-                              device_id=device_id, 
-                              next_token=prev_token,
-                              token_history=','.join(token_list[:current_page-2]),
-                              page=current_page-1)
+            # More robust previous token logic
+            if current_page > 2 and len(token_list) >= current_page-2:
+                prev_token = token_list[current_page-3]
+                prev_url = url_for('view_device_classifications',
+                                  device_id=device_id,
+                                  next_token=prev_token,
+                                  token_history=','.join(token_list[:current_page-2]),
+                                  page=current_page-1)
+            else:
+                # Fallback to page 1 if we can't determine the exact previous token
+                prev_url = url_for('view_device_classifications', device_id=device_id, page=1)
     
     # Generate pagination URLs
     next_page_token = result['next_token']
@@ -231,8 +242,8 @@ def view_models():
         if 'id' in item and 'model_id' not in item:
             item['model_id'] = item['id']
             
-    # Update token history if moving forward
-    if next_token and next_token not in token_list:
+    # Update token history if moving forward and we have items
+    if next_token and next_token not in token_list and result['items']:
         if current_page > len(token_list):
             token_list.append(next_token)
     
@@ -293,8 +304,8 @@ def view_table(table_type):
             if 'id' in item and 'model_id' not in item:
                 item['model_id'] = item['id']
                 
-    # Update token history if moving forward
-    if next_token and next_token not in token_list:
+    # Update token history if moving forward and we have items
+    if next_token and next_token not in token_list and result['items']:
         if current_page > len(token_list):
             token_list.append(next_token)
     
