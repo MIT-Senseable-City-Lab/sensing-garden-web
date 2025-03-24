@@ -468,8 +468,7 @@ def add_model_submit():
         # Create the model using the new API
         model = client.models.create(**model_data)
         
-        # Redirect to the correct endpoint for viewing models
-        return redirect('/view_table/models')
+        return redirect(url_for('view_table', table_type='models'))
     except Exception as e:
         return render_template('add_model.html', error=str(e))
 
