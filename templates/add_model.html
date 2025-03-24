@@ -5,7 +5,7 @@
 {% block content %}
 <div class="container mt-4">
     <h2>Add New Model</h2>
-    <form id="add-model-form" class="needs-validation" novalidate>
+    <form id="add-model-form" action="{{ url_for('add_model_submit') }}" method="POST" class="needs-validation" novalidate>
         <div class="form-group mb-3">
             <label for="model_id">Model ID*</label>
             <input type="text" class="form-control" id="model_id" name="model_id" required>
@@ -34,7 +34,7 @@
         </div>
         
         <button type="submit" class="btn btn-primary">Add Model</button>
-        <a href="{{ url_for('view_models') }}" class="btn btn-secondary">Cancel</a>
+        <a href="{{ url_for('view_table', table_type='models') }}" class="btn btn-secondary">Cancel</a>
     </form>
 
     {% if error %}
@@ -78,7 +78,7 @@ document.getElementById('add-model-form').addEventListener('submit', function(e)
     })
     .then(response => {
         if (response.ok) {
-            window.location.href = '/models';
+            window.location.href = '/view_table/models';
         } else {
             return response.text().then(text => {
                 throw new Error(text);

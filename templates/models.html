@@ -20,10 +20,10 @@
     {% if field_names %}
     {% set pagination = {
     'has_next': next_token is not none,
-    'next_url': url_for('view_models', next_token=next_token, prev_token=prev_token, token_history=token_history) if
+    'next_url': url_for('view_table', table_type='models', next_token=next_token, prev_token=prev_token, token_history=token_history) if
     next_token else None,
     'has_prev': prev_token is not none,
-    'prev_url': url_for('view_models', next_token=prev_token, prev_token=next_token, token_history=token_history) if
+    'prev_url': url_for('view_table', table_type='models', next_token=prev_token, prev_token=next_token, token_history=token_history) if
     prev_token else None
     } %}
 
