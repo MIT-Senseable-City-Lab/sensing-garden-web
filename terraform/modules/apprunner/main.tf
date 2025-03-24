@@ -8,7 +8,7 @@ resource "aws_iam_role" "app_runner_service_role" {
         Action = "sts:AssumeRole"
         Effect = "Allow"
         Principal = {
-          Service = "build.apprunner.amazonaws.com"
+          Service = ["build.apprunner.amazonaws.com", "tasks.apprunner.amazonaws.com"]
         }
       }
     ]
@@ -22,26 +22,45 @@ resource "aws_iam_role_policy_attachment" "app_runner_service_policy" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSAppRunnerServicePolicyForECRAccess"
 }
 
+# Generate a random suffix for the service name
+resource "random_string" "suffix" {
+  length  = 8
+  special = false
+  upper   = false
+}
+
 resource "aws_apprunner_service" "service" {
-  service_name = var.app_name
+  service_name = "${var.app_name}-${random_string.suffix.result}"
   
   source_configuration {
     authentication_configuration {
-      access_role_arn = aws_iam_role.app_runner_service_role.arn
+      connection_arn = "arn:aws:apprunner:us-east-1:436312947046:connection/sensing-garden-github/12345678-1234-1234-1234-123456789012"
     }
     
-    image_repository {
-      image_configuration {
-        port = var.port
-        runtime_environment_variables = {
-          "FLASK_APP"               = "app.py"
-          "FLASK_ENV"               = "production"
-          "SENSING_GARDEN_API_KEY"  = var.sensing_garden_api_key
-          "API_BASE_URL"            = var.api_base_url
+    code_repository {
+      code_configuration {
+        configuration_source = "API"
+        
+        code_configuration_values {
+          runtime = "PYTHON_3"
+          build_command = "pip install poetry && poetry config virtualenvs.create false && poetry install --no-dev"
+          start_command = "./start.sh"
+          port = var.port
+          runtime_environment_variables = {
+            "FLASK_APP"               = "app.py"
+            "FLASK_ENV"               = "production"
+            "SENSING_GARDEN_API_KEY"  = var.sensing_garden_api_key
+            "API_BASE_URL"            = var.api_base_url
+            "PORT"                    = tostring(var.port)
+          }
         }
       }
-      image_identifier      = "${var.ecr_repository_url}:${var.image_tag}"
-      image_repository_type = "ECR"
+      
+      repository_url = var.repository_url
+      source_code_version {
+        type  = "BRANCH"
+        value = var.source_code_branch
+      }
     }
     
     auto_deployments_enabled = var.auto_deployments_enabled
@@ -53,11 +72,23 @@ resource "aws_apprunner_service" "service" {
   }
   
   health_check_configuration {
-    path     = "/"
+    path     = "/health"
     protocol = "HTTP"
+    interval = 10
+    timeout  = 5
+    healthy_threshold   = 1
+    unhealthy_threshold = 5
   }
   
   tags = var.tags
   
   depends_on = [aws_iam_role_policy_attachment.app_runner_service_policy]
+  
+  # Use lifecycle block to ignore changes to the image identifier
+  # This allows auto-deployments to work without Terraform trying to update the service
+  lifecycle {
+    ignore_changes = [
+      source_configuration[0].image_repository[0].image_identifier
+    ]
+  }
 }

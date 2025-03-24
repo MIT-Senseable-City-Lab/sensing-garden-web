@@ -31,13 +31,13 @@ curl -sSL https://install.python-poetry.org | python3 -
 3. Run the dashboard:
 
 ```bash
-poetry run flask run --host=0.0.0.0 --port=5052
+poetry run flask run --host=0.0.0.0 --port=8080
 ```
 
 4. Open your browser and navigate to:
 
 ```
-http://localhost:5052
+http://localhost:8080
 ```
 
 ### Option 2: Using Docker
@@ -53,7 +53,7 @@ docker-compose up --build
 3. Open your browser and navigate to:
 
 ```
-http://localhost:5052
+http://localhost:8080
 ```
 
 ## Features

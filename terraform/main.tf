@@ -4,6 +4,10 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 4.0"
     }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.0"
+    }
   }
   
   # Uncomment this block to configure remote state
@@ -20,19 +24,14 @@ provider "aws" {
   region = var.aws_region
 }
 
-module "ecr" {
-  source = "./modules/ecr"
-  
-  repository_name = var.ecr_repository_name
-  tags            = var.tags
-}
+# No longer need the ECR module since we're using source-based deployment
 
 module "apprunner" {
   source = "./modules/apprunner"
   
   app_name                 = var.app_name
-  ecr_repository_url       = module.ecr.repository_url
-  image_tag                = var.image_tag
+  repository_url           = var.repository_url
+  source_code_branch       = var.source_code_branch
   port                     = var.port
   sensing_garden_api_key   = var.sensing_garden_api_key
   api_base_url             = var.api_base_url

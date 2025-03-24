@@ -9,6 +9,6 @@ if [ ! -d .venv ]; then
 fi
 
 echo "Setup complete! You can now run the application with:"
-echo "poetry run flask run --host=0.0.0.0 --port=5052"
+echo "poetry run flask run --host=0.0.0.0 --port=8080"
 echo "or with Docker:"
 echo "docker-compose up --build"

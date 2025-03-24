@@ -3,21 +3,21 @@ variable "app_name" {
   type        = string
 }
 
-variable "ecr_repository_url" {
-  description = "URL of the ECR repository containing the Docker image"
+variable "repository_url" {
+  description = "URL of the Git repository to deploy from"
   type        = string
 }
 
-variable "image_tag" {
-  description = "Docker image tag to deploy"
+variable "source_code_branch" {
+  description = "Branch of the Git repository to deploy"
   type        = string
-  default     = "latest"
+  default     = "main"
 }
 
 variable "port" {
   description = "Port the container exposes"
   type        = number
-  default     = 5052
+  default     = 8080
 }
 
 variable "sensing_garden_api_key" {

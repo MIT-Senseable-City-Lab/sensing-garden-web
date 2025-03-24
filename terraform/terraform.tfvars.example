@@ -2,7 +2,7 @@ aws_region = "us-east-1"
 app_name = "sensing-garden-web"
 ecr_repository_name = "sensing-garden-web"
 image_tag = "latest"
-port = 5052
+port = 8080
 sensing_garden_api_key = "your-api-key-here"  # Replace with actual API key; consider using AWS Secrets Manager
 api_base_url = "https://api.example.com"      # Replace with your actual API base URL
 

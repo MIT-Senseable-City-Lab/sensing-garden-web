@@ -10,30 +10,34 @@ variable "app_name" {
   default     = "sensing-garden-web"
 }
 
-variable "ecr_repository_name" {
-  description = "Name of the ECR repository"
+variable "repository_url" {
+  description = "URL of the Git repository to deploy from"
   type        = string
-  default     = "sensing-garden-web"
+  default     = "https://github.com/daydemir/sensing-garden-web"
 }
 
-variable "image_tag" {
-  description = "Docker image tag to deploy"
+variable "source_code_branch" {
+  description = "Branch of the Git repository to deploy"
   type        = string
-  default     = "latest"
+  default     = "main"
 }
 
 variable "port" {
   description = "Port the container exposes"
   type        = number
-  default     = 5052
+  default     = 8080
 }
 
+# This variable is populated from the TF_VAR_sensing_garden_api_key environment variable
+# which is set by the set_env.sh script from your SENSING_GARDEN_API_KEY in .env
 variable "sensing_garden_api_key" {
   description = "API key for the Sensing Garden API"
   type        = string
   sensitive   = true
 }
 
+# This variable is populated from the TF_VAR_api_base_url environment variable
+# which is set by the set_env.sh script from your API_BASE_URL in .env
 variable "api_base_url" {
   description = "Base URL for the Sensing Garden API"
   type        = string
