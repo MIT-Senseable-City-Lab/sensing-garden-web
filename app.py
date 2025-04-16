@@ -126,9 +126,9 @@ def health_check():
 
 @app.route('/')
 def index():
-    # Fetch all device IDs from the detections data
-    result = fetch_data('detections')  # Using hardcoded limit of 50 items per page
-    device_ids = {item['device_id'] for item in result['items'] if 'device_id' in item}
+    # Fetch all device IDs from the videos table
+    result = client.videos.fetch(limit=1000)
+    device_ids = {item['device_id'] for item in result.get('items', []) if 'device_id' in item}
     return render_template('index.html', device_ids=device_ids)
 
 @app.route('/view_device/<device_id>')
