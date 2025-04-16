@@ -18,7 +18,10 @@ app = Flask(__name__)
 # Create client instance
 client = SensingGardenClient(
     base_url=os.getenv('API_BASE_URL'),
-    api_key=os.getenv('SENSING_GARDEN_API_KEY')
+    api_key=os.getenv('SENSING_GARDEN_API_KEY'),
+    aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'),
+    aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY'),
+    aws_region=os.getenv('AWS_REGION')
 )
 
 def fetch_data(table_type: str, device_id: Optional[str] = None, next_token: Optional[str] = None, sort_by: Optional[str] = None, sort_desc: Optional[bool] = False) -> Dict[str, Any]:
@@ -50,13 +53,19 @@ def fetch_data(table_type: str, device_id: Optional[str] = None, next_token: Opt
                 sort_desc=sort_desc
             )
         elif table_type == 'videos':
-            response = client.videos.fetch(
-                device_id=device_id,
-                limit=limit,
-                next_token=next_token,
-                sort_by=sort_by,
-                sort_desc=sort_desc
-            )
+            print(f"[DEBUG] client.videos type: {type(client.videos)}, value: {client.videos}")
+            try:
+                response = client.videos.fetch(
+                    device_id=device_id,
+                    limit=limit,
+                    next_token=next_token,
+                    sort_by=sort_by,
+                    sort_desc=sort_desc
+                )
+                print(f"[DEBUG] client.videos.fetch response: {response}")
+            except Exception as fetch_exc:
+                print(f"[ERROR] Exception in client.videos.fetch: {fetch_exc}")
+                raise
         else:
             return {'items': [], 'next_token': None}
         
@@ -144,7 +153,16 @@ def view_device(device_id):
             limit=50,
             next_token=next_token
         )
-        
+        # Fetch videos for the device (just to get the count)
+        videos_response = client.videos.fetch(
+            device_id=device_id,
+            limit=100
+        )
+        count = len(videos_response.get('items', []))
+        if count == 100:
+            videos_count = '99+'
+        else:
+            videos_count = str(count)
         # Get field names directly from the data
         detection_fields = []
         classification_fields = []
@@ -162,7 +180,8 @@ def view_device(device_id):
                                classification_fields=classification_fields,
                                next_token=detection_response.get('next_token'),  # Use detection token as primary
                                prev_token=prev_token,
-                               token_history=token_history)
+                               token_history=token_history,
+                               videos_count=videos_count)
     except Exception as e:
         return render_template('error.html', error=str(e))
 

@@ -19,7 +19,6 @@
                     <tr>
                         <th>Timestamp</th>
                         <th>Video</th>
-                        <th>Details</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -38,25 +37,7 @@
                             <span class="text-muted">No video available</span>
                             {% endif %}
                         </td>
-                        <td>
-                            <button class="btn btn-sm btn-info" type="button" data-bs-toggle="collapse" 
-                                    data-bs-target="#details-{{ loop.index }}" aria-expanded="false" 
-                                    aria-controls="details-{{ loop.index }}">
-                                Show Details
-                            </button>
-                            <div class="collapse mt-2" id="details-{{ loop.index }}">
-                                <div class="card card-body">
-                                    <dl class="row">
-                                        {% for key, value in item.items() %}
-                                        {% if key not in ['video_url', 'formatted_time'] %}
-                                        <dt class="col-sm-4">{{ key }}</dt>
-                                        <dd class="col-sm-8">{{ value }}</dd>
-                                        {% endif %}
-                                        {% endfor %}
-                                    </dl>
-                                </div>
-                            </div>
-                        </td>
+
                     </tr>
                     {% endfor %}
                 </tbody>

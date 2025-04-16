@@ -7,6 +7,7 @@
     <h2>Device {{ device_id }} Data</h2>
     <p>Number of Detections: {{ detections|length }}</p>
     <p>Number of Classifications: {{ classifications|length }}</p>
+    <p>Number of Videos: {{ videos_count }}</p>
     <p>Models in Use: {{ models }}</p>
     <a href="{{ url_for('view_device_detections', device_id=device_id) }}" class="btn btn-primary">View Detections</a>
     <a href="{{ url_for('view_device_classifications', device_id=device_id) }}" class="btn btn-primary">View
