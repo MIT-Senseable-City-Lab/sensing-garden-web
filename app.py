@@ -49,6 +49,14 @@ def fetch_data(table_type: str, device_id: Optional[str] = None, next_token: Opt
                 sort_by=sort_by,
                 sort_desc=sort_desc
             )
+        elif table_type == 'videos':
+            response = client.videos.fetch(
+                device_id=device_id,
+                limit=limit,
+                next_token=next_token,
+                sort_by=sort_by,
+                sort_desc=sort_desc
+            )
         else:
             return {'items': [], 'next_token': None}
         
@@ -471,6 +479,79 @@ def add_model_submit():
         return redirect(url_for('view_table', table_type='models'))
     except Exception as e:
         return render_template('add_model.html', error=str(e))
+
+@app.route('/view_device/<device_id>/videos')
+def view_device_videos(device_id):
+    # Get pagination token from request if available
+    next_token = request.args.get('next_token', None)
+    prev_token = request.args.get('prev_token', None)
+    
+    # Track page tokens for Previous button
+    token_history = request.args.get('token_history', '')
+    current_page = int(request.args.get('page', '1'))
+    
+    # Process token history
+    token_list = token_history.split(',') if token_history else []
+    
+    # Get sort parameters
+    sort_by = request.args.get('sort_by', None)
+    sort_desc = request.args.get('sort_desc', 'false') == 'true'
+    
+    # Fetch videos content for the selected device with pagination and sorting
+    result = fetch_data('videos', device_id=device_id, next_token=next_token, sort_by=sort_by, sort_desc=sort_desc)
+    print(f"Fetched videos for device {device_id}, next_token: {next_token}, page: {current_page}, sort_by: {sort_by}, sort_desc: {sort_desc}")
+    
+    # Get field names directly from the data
+    fields = get_field_names(result['items'])
+    if 'formatted_time' not in fields and 'timestamp' in fields:
+        fields.append('formatted_time')  # Add formatted_time for display purposes
+    
+    # Update token history if moving forward and we have items
+    if next_token and next_token not in token_list and result['items']:
+        if current_page > len(token_list):
+            token_list.append(next_token)
+    
+    # Get previous token (if we're not on the first page)
+    prev_url = None
+    if current_page > 1:
+        if current_page == 2:  # Going back to first page
+            prev_url = url_for('view_device_videos', device_id=device_id, page=1)
+        else:  # Going back to previous page
+            prev_token = token_list[current_page-3] if current_page > 2 and len(token_list) >= current_page-2 else None
+            prev_url = url_for('view_device_videos', 
+                              device_id=device_id, 
+                              next_token=prev_token,
+                              page=current_page-1,
+                              token_history=','.join(token_list[:current_page-2]))
+    
+    # Get next URL if we have a next token
+    next_url = None
+    if result['next_token']:
+        next_url = url_for('view_device_videos', 
+                          device_id=device_id, 
+                          next_token=result['next_token'],
+                          page=current_page+1,
+                          token_history=','.join(token_list))
+    
+    # Create pagination object for template
+    pagination = {
+        'has_prev': prev_url is not None,
+        'has_next': next_url is not None,
+        'prev_url': prev_url,
+        'next_url': next_url
+    }
+    
+    # Create download URL
+    download_url = url_for('download_csv', table_type=f"videos_{device_id}")
+    
+    return render_template('videos.html', 
+                           device_id=device_id, 
+                           items=result['items'],
+                           fields=fields,
+                           pagination=pagination,
+                           current_sort_by=sort_by,
+                           current_sort_desc=sort_desc,
+                           download_url=download_url)
 
 if __name__ == '__main__':
     # Get port from environment variable or default to 8080

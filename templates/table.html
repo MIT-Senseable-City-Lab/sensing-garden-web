@@ -4,11 +4,10 @@ current_sort_desc=None) %}
 <div class="mb-3">
     <div class="d-flex justify-content-between align-items-center">
         <div>
-            <button onclick="window.open('{{ download_url }}', '_blank')" class="btn btn-secondary">Download
-                CSV</button>
+            <a href="{{ download_url }}" target="_blank" class="btn btn-secondary">Download CSV</a>
         </div>
         <div>
-            <select class="form-control" id="{{ table_id }}_sort" onchange="sortTable('{{ table_id }}', this.value)">
+            <select class="form-control sort-select" id="{{ table_id }}_sort" data-table-id="{{ table_id }}">
                 <option value="">Sort by...</option>
                 {% for field in headers %}
                 <option value="{{ field }}_asc" {% if current_sort_by==field and not current_sort_desc %}selected{%
@@ -31,7 +30,7 @@ current_sort_desc=None) %}
 
 <!-- Table within scrollable area -->
 <div class="table-responsive w-100">
-    <table id="{{ table_id }}" class="table table-striped w-100" style="width: 100% !important;">
+    <table id="{{ table_id }}" data-table-id="{{ table_id }}" class="table table-bordered table-hover table-responsive" style="width: 100%;">
         <thead>
             <tr>
                 {% for header in headers %}
@@ -45,9 +44,21 @@ current_sort_desc=None) %}
                 {% for header in headers %}
                 <td>
                     {% if header == 'image_url' and item.get('image_url') %}
-                    <a href="{{ item.image_url }}" target="_blank">
-                        <img src="{{ item.image_url }}" class="img-fluid" style="max-height: 100px;">
-                    </a>
+                    <div style="position: relative; display: inline-block; max-height: 100px;">
+                        {% set bbox = item.get('bounding_box', None) %}
+                        <img src="{{ item.image_url }}" class="img-fluid detection-img clickable-image"
+                            style="max-height: 100px; display: block; cursor: pointer;"
+                            data-image-url="{{ item.image_url }}"
+                            data-bbox="{{ bbox|tojson if bbox and bbox|length==4 else 'null' }}">
+                        <!-- DEBUG: bbox for image_url={{ item.image_url }} is {{ bbox }} -->
+
+                        {% if bbox and bbox|length == 4 %}
+                        <svg class="bbox-svg-overlay"
+                            style="position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none;">
+                            <polygon points="" style="fill:none;stroke:#ff0000;stroke-width:2;" />
+                        </svg>
+                        {% endif %}
+                    </div>
                     {% elif header in ['image_key', 'image_bucket'] %}
                     {{ item.get(header, '') }}
                     {% if header == 'image_key' and item.get('image_url') %}
@@ -83,199 +94,47 @@ current_sort_desc=None) %}
 </div>
 {% endmacro %}
 
-{% macro table_scripts(table_id) %}
-<style>
-    /* Responsive adjustments */
-    @media (max-width: 768px) {
-        .mb-3.d-flex {
-            flex-direction: column;
-            align-items: stretch !important;
-        }
-    }
+{% macro bbox_overlay_script() %}
+<script src="{{ url_for('static', filename='js/bbox_overlays.js') }}"></script>
 
-    /* Force full width for tables */
-    .table-responsive {
-        width: 100% !important;
-        margin: 0 !important;
-        overflow-x: auto !important;
-    }
 
-    /* Force DataTables to use full width */
-    .dataTable {
-        width: 100% !important;
-        max-width: none !important;
-    }
-
-    /* Override DataTables auto width calculation */
-    .dataTables_wrapper {
-        width: 100% !important;
-    }
-
-    /* Fix column widths to be more balanced */
-    .dataTable th,
-    .dataTable td {
-        white-space: normal !important;
-    }
-</style>
-<script type="text/javascript">
-    // No search functions needed
-    // Ensure the document is fully loaded and jQuery is available
-    document.addEventListener('DOMContentLoaded', function () {
-        // Check if jQuery and DataTable are available
-        if (typeof $ === 'undefined' || typeof $.fn.DataTable === 'undefined') {
-            console.error('jQuery or DataTable not loaded');
-            return;
-        }
-
-        // Directly ensure the search input is connected to the right table
-        var searchInput = document.getElementById('{{ table_id }}_search_input');
-        if (searchInput) {
-            console.log('Search input found for {{ table_id }}');
-        } else {
-            console.error('Search input not found for {{ table_id }}');
-        }
-        if ($.fn.DataTable.isDataTable('#{{ table_id }}')) {
-            $('#{{ table_id }}').DataTable().destroy();
-        }
-
-        console.log('Initializing DataTable for #{{ table_id }}');
-        // Initializing DataTable
-        // Initialize DataTable with custom DOM structure
-        var tableElement = $('#{{ table_id }}');
-        if (tableElement.length === 0) {
-            console.error('Table element #{{ table_id }} not found');
-            return;
-        }
-        // Add custom class for easier identification
-        tableElement.addClass('dt-table-{{ table_id }}');
-
-        var table = tableElement.DataTable({
-            paging: true,
-            searching: false,
-            ordering: false, // Disable column sorting
-            info: true,
-            lengthMenu: [[50], [50]], // Fixed to 50 items per page
-            // Basic DOM structure - just table
-            dom: 't',
-            autoWidth: true,
-            responsive: true,
-            scrollX: true,
-            scrollCollapse: true,
-            // Basic callback when table is drawn
-            drawCallback: function () {
-                console.log('Table drawn');
-                // Force table width on draw
-                $(this).css('width', '100%');
-            },
-            // Move elements to our custom containers
-            initComplete: function () {
-                // No search input setup needed
-
-                // Create and append length control
-                var lengthHtml = '<label>Show <select name="{{ table_id }}_length" aria-controls="{{ table_id }}" class="form-select form-select-sm">' +
-                    '<option value="10">10</option>' +
-                    '<option value="25">25</option>' +
-                    '<option value="50">50</option>' +
-                    '<option value="-1">All</option>' +
-                    '</select> entries</label>';
-                $('#{{ table_id }}_length').html(lengthHtml);
-
-                // Connect length control to DataTable
-                $('#{{ table_id }}_length select').on('change', function () {
-                    table.page.len($(this).val()).draw();
-                });
-
-                // Set up info display
-                var updateInfo = function () {
-                    var info = table.page.info();
-                    var infoText = 'Showing ' + (info.start + 1) + ' to ' + info.end + ' of ' + info.recordsDisplay + ' entries';
-                    if (info.recordsDisplay != info.recordsTotal) {
-                        infoText += ' (filtered from ' + info.recordsTotal + ' total entries)';
-                    }
-                    $('#{{ table_id }}_info').html(infoText);
-                };
-
-                updateInfo();
-                table.on('draw', updateInfo);
-
-                // Create pagination
-                var createPagination = function () {
-                    var info = table.page.info();
-                    var html = '<ul class="pagination">';
-
-                    // Previous button
-                    html += '<li class="paginate_button page-item previous ' + (info.page === 0 ? 'disabled' : '') + '">' +
-                        '<a href="#" class="page-link" data-page="prev">Previous</a></li>';
-
-                    // Page numbers
-                    var startPage = Math.max(0, info.page - 2);
-                    var endPage = Math.min(info.pages - 1, info.page + 2);
-
-                    if (startPage > 0) {
-                        html += '<li class="paginate_button page-item"><a href="#" class="page-link" data-page="0">1</a></li>';
-                        if (startPage > 1) html += '<li class="paginate_button page-item disabled"><a href="#" class="page-link">...</a></li>';
-                    }
-
-                    for (var i = startPage; i <= endPage; i++) {
-                        html += '<li class="paginate_button page-item ' + (i === info.page ? 'active' : '') + '">' +
-                            '<a href="#" class="page-link" data-page="' + i + '">' + (i + 1) + '</a></li>';
-                    }
-
-                    if (endPage < info.pages - 1) {
-                        if (endPage < info.pages - 2) html += '<li class="paginate_button page-item disabled"><a href="#" class="page-link">...</a></li>';
-                        html += '<li class="paginate_button page-item"><a href="#" class="page-link" data-page="' + (info.pages - 1) + '">' + info.pages + '</a></li>';
-                    }
-
-                    // Next button
-                    html += '<li class="paginate_button page-item next ' + (info.page === info.pages - 1 ? 'disabled' : '') + '">' +
-                        '<a href="#" class="page-link" data-page="next">Next</a></li>';
-
-                    html += '</ul>';
-                    $('#{{ table_id }}_paginate').html(html);
-
-                    // Add event handlers
-                    $('#{{ table_id }}_paginate .page-link').on('click', function (e) {
-                        e.preventDefault();
-                        var page = $(this).data('page');
-                        if (page === 'prev') {
-                            table.page('previous').draw('page');
-                        } else if (page === 'next') {
-                            table.page('next').draw('page');
-                        } else {
-                            table.page(page).draw('page');
-                        }
-                    });
-                };
-
-                createPagination();
-                table.on('draw', createPagination);
-            }
-        });
-
-        // No search button handlers needed
-    });
-
-    function downloadCSV(url) {
-        window.open(url, '_blank');
-    }
-
-    function sortTable(tableId, value) {
-        if (!value) return;  // Don't do anything if no value selected
-
-        const [field, order] = value.split('_');
-        const currentUrl = new URL(window.location.href);
-
-        // Set the sort parameters for the API request
-        currentUrl.searchParams.set('sort_by', field);
-        currentUrl.searchParams.set('sort_desc', order === 'desc');
-
-        // Reset pagination when sorting changes
-        currentUrl.searchParams.delete('next_token');
-        currentUrl.searchParams.delete('prev_token');
-        currentUrl.searchParams.set('page', '1');
-
-        // Navigate to the new URL to trigger a new API request
-        window.location.href = currentUrl.toString();
-    }
-</script>
 {% endmacro %}
+
+{% macro table_scripts(table_id) %}
+{{ bbox_overlay_script() }}
+    <link rel="stylesheet" href="https://cdn.datatables.net/1.10.21/css/jquery.dataTables.min.css">
+    <style>
+        /* Responsive adjustments */
+        @media (max-width: 768px) {
+            .mb-3.d-flex {
+                flex-direction: column;
+                align-items: stretch !important;
+            }
+        }
+
+        /* Force full width for tables */
+        .table-responsive {
+            width: 100% !important;
+            margin: 0 !important;
+            overflow-x: auto !important;
+        }
+
+        /* Force DataTables to use full width */
+        .dataTable {
+            width: 100% !important;
+            max-width: none !important;
+        }
+
+        /* Override DataTables auto width calculation */
+        .dataTables_wrapper {
+            width: 100% !important;
+        }
+
+        /* Fix column widths to be more balanced */
+        .dataTable th,
+        .dataTable td {
+            white-space: normal !important;
+        }
+    </style>
+    <script src="{{ url_for('static', filename='js/table_scripts.js') }}"></script>
+    {% endmacro %}
