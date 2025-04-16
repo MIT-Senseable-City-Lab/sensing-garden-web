@@ -142,7 +142,12 @@ def view_device(device_id):
     token_history = request.args.get('token_history', '')
     
     try:
-        # Fetch detection and classification content for the selected device
+        # Use count() for detections, classifications, and videos
+        detections_count = str(client.detections.count(device_id=device_id))
+        classifications_count = str(client.classifications.count(device_id=device_id))
+        videos_count = str(client.videos.count(device_id=device_id))
+
+        # Fetch detection and classification content for the selected device (for table display)
         detection_response = client.detections.fetch(
             device_id=device_id,
             limit=50,
@@ -153,16 +158,6 @@ def view_device(device_id):
             limit=50,
             next_token=next_token
         )
-        # Fetch videos for the device (just to get the count)
-        videos_response = client.videos.fetch(
-            device_id=device_id,
-            limit=100
-        )
-        count = len(videos_response.get('items', []))
-        if count == 100:
-            videos_count = '99+'
-        else:
-            videos_count = str(count)
         # Get field names directly from the data
         detection_fields = []
         classification_fields = []
@@ -181,6 +176,8 @@ def view_device(device_id):
                                next_token=detection_response.get('next_token'),  # Use detection token as primary
                                prev_token=prev_token,
                                token_history=token_history,
+                               detections_count=detections_count,
+                               classifications_count=classifications_count,
                                videos_count=videos_count)
     except Exception as e:
         return render_template('error.html', error=str(e))
