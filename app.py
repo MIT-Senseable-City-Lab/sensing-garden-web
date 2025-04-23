@@ -126,19 +126,19 @@ def health_check():
 
 @app.route('/')
 def index():
-    device_ids = set()
-    next_token = None
-    max_device_ids = 1000  # adjustable limit for safety
-    while True:
-        result = client.videos.fetch(limit=100, next_token=next_token)
-        for item in result.get('items', []):
-            if 'device_id' in item:
-                device_ids.add(item['device_id'])
-        next_token = result.get('next_token')
-        # Stop if no more pages or if we've seen enough device_ids
-        if not next_token or len(device_ids) >= max_device_ids:
-            break
+    try:
+        devices_tuple = client.get_devices()
+        print('DEBUG: client.get_devices() returned:', devices_tuple)
+        devices = devices_tuple[0] if isinstance(devices_tuple, tuple) else devices_tuple
+        # If get_devices() returns a list of dicts with 'device_id', extract them
+        if devices and isinstance(devices, list):
+            device_ids = [d['device_id'] if isinstance(d, dict) and 'device_id' in d else d for d in devices]
+        else:
+            device_ids = []
+    except Exception as e:
+        device_ids = []
     return render_template('index.html', device_ids=device_ids)
+
 
 @app.route('/view_device/<device_id>')
 def view_device(device_id):

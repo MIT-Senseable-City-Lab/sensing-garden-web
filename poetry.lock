@@ -755,14 +755,14 @@ crt = ["botocore[crt] (>=1.37.4,<2.0a.0)"]
 
 [[package]]
 name = "sensing-garden-client"
-version = "0.0.8"
+version = "0.0.10"
 description = "Sensing Garden Client for API interaction"
 optional = false
 python-versions = ">=3.8"
 groups = ["main"]
 files = [
-    {file = "sensing_garden_client-0.0.8-py3-none-any.whl", hash = "sha256:410fa519cacc25fdfd21e275670b43bb68f3a10a02a76311beb389be66c16b10"},
-    {file = "sensing_garden_client-0.0.8.tar.gz", hash = "sha256:a81d2be71150b6e61dbd5f31b32af29d86bf64a786bca74ca05475a2eb629e10"},
+    {file = "sensing_garden_client-0.0.10-py3-none-any.whl", hash = "sha256:51fec42fe17f1b288bd37754f21f67a3ff8cb17fc195da19d22754469ad3a2e7"},
+    {file = "sensing_garden_client-0.0.10.tar.gz", hash = "sha256:d017d7ba030da08f6980a0165793088d16211998cf89475c493f357314dc77f1"},
 ]
 
 [package.dependencies]
@@ -931,4 +931,4 @@ type = ["pytest-mypy"]
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.9"
-content-hash = "71bee960b5ee7221fe44be894e821195ec709480ba5f71aaac771e3667ca9205"
+content-hash = "ab39c6616285ecac0fed34b621b1f5fef412fe7dc3904f274cbdc90648abc5ab"
