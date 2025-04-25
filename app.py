@@ -519,8 +519,15 @@ def view_device_videos(device_id):
     token_list = token_history.split(',') if token_history else []
     
     # Get sort parameters
-    sort_by = request.args.get('sort_by', None)
-    sort_desc = request.args.get('sort_desc', 'false') == 'true'
+    sort_by = request.args.get('sort_by')
+    sort_desc = request.args.get('sort_desc')
+    # By default, sort videos by timestamp descending unless overridden by request
+    if sort_by is None:
+        sort_by = 'timestamp'
+    if sort_desc is None:
+        sort_desc = True
+    else:
+        sort_desc = sort_desc.lower() == 'true'
     
     # Fetch videos content for the selected device with pagination and sorting
     result = fetch_data('videos', device_id=device_id, next_token=next_token, sort_by=sort_by, sort_desc=sort_desc)
