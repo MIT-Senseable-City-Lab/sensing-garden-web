@@ -29,8 +29,8 @@ current_sort_desc=None) %}
 </div>
 
 <!-- Table within scrollable area -->
-<div class="table-responsive w-100">
-    <table id="{{ table_id }}" data-table-id="{{ table_id }}" class="table table-bordered table-hover table-responsive" style="width: 100%;">
+<div class="table-responsive">
+    <table id="{{ table_id }}" data-table-id="{{ table_id }}" class="table table-bordered table-hover">
         <thead>
             <tr>
                 {% for header in headers %}
@@ -102,39 +102,12 @@ current_sort_desc=None) %}
 
 {% macro table_scripts(table_id) %}
 {{ bbox_overlay_script() }}
-    <link rel="stylesheet" href="https://cdn.datatables.net/1.10.21/css/jquery.dataTables.min.css">
     <style>
-        /* Responsive adjustments */
         @media (max-width: 768px) {
             .mb-3.d-flex {
                 flex-direction: column;
                 align-items: stretch !important;
             }
         }
-
-        /* Force full width for tables */
-        .table-responsive {
-            width: 100% !important;
-            margin: 0 !important;
-            overflow-x: auto !important;
-        }
-
-        /* Force DataTables to use full width */
-        .dataTable {
-            width: 100% !important;
-            max-width: none !important;
-        }
-
-        /* Override DataTables auto width calculation */
-        .dataTables_wrapper {
-            width: 100% !important;
-        }
-
-        /* Fix column widths to be more balanced */
-        .dataTable th,
-        .dataTable td {
-            white-space: normal !important;
-        }
     </style>
-    <script src="{{ url_for('static', filename='js/table_scripts.js') }}"></script>
-    {% endmacro %}
+{% endmacro %}

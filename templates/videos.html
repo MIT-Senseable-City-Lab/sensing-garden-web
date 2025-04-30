@@ -26,17 +26,20 @@
                     <tr>
                         <td>{{ item.get('formatted_time', item.get('timestamp', '')) }}</td>
                         <td>
-                            {% if item.get('video_url') %}
-                            <div class="video-container">
-                                <video controls style="max-width: 100%; max-height: 200px;">
-                                    <source src="{{ item.video_url }}" type="video/mp4">
-                                    Your browser does not support the video tag.
-                                </video>
-                            </div>
-                            {% else %}
-                            <span class="text-muted">No video available</span>
-                            {% endif %}
-                        </td>
+    {% if item.get('video_url') %}
+    <div class="video-container mb-2">
+        <video controls style="max-width: 100%; max-height: 200px;">
+            <source src="{{ item.video_url }}" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+    </div>
+    <button type="button" class="btn btn-sm btn-outline-primary mt-1 download-video-btn" data-url="{{ item.video_url }}">
+    <i class="fas fa-download"></i> Download
+</button>
+    {% else %}
+    <span class="text-muted">No video available</span>
+    {% endif %}
+</td>
 
                     </tr>
                     {% endfor %}
@@ -68,10 +71,11 @@
 {% block scripts %}
 <style>
     .video-container {
-        position: relative;
-        width: 100%;
-        max-width: 320px;
-    }
+    position: relative;
+    width: 100%;
+    max-width: 320px;
+    margin-bottom: 0.5rem;
+}
     
     video {
         border-radius: 4px;
@@ -79,31 +83,56 @@
     }
     
     .table-responsive {
-        width: 100% !important;
-        margin: 0 !important;
-        overflow-x: auto !important;
-    }
+    width: 100% !important;
+    margin: 0 !important;
+    overflow-x: auto !important;
+}
+
+#videos_table th {
+    position: sticky;
+    top: 0;
+    background: #fff;
+    z-index: 2;
+}
 </style>
 
 <script>
-    document.addEventListener('DOMContentLoaded', function() {
-        // Initialize any Bootstrap components
-        var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'))
-        var tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
-            return new bootstrap.Tooltip(tooltipTriggerEl)
-        });
-        
-        // Add DataTable initialization if needed
-        if (typeof $.fn.DataTable !== 'undefined') {
-            $('#videos_table').DataTable({
-                paging: false,
-                searching: false,
-                ordering: false,
-                info: false,
-                responsive: true,
-                autoWidth: true
-            });
-        }
+document.addEventListener('DOMContentLoaded', function() {
+    // Initialize any Bootstrap components
+    var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+    var tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
+        return new bootstrap.Tooltip(tooltipTriggerEl);
     });
+
+    // Add DataTable initialization if needed
+    if (typeof $.fn.DataTable !== 'undefined') {
+        $('#videos_table').DataTable({
+            paging: false,
+            searching: false,
+            ordering: false,
+            info: false,
+            responsive: true,
+            autoWidth: true
+        });
+    }
+
+    // Download video button handler
+    document.querySelectorAll('.download-video-btn').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            const url = btn.getAttribute('data-url');
+            const filename = url.split('/').pop().split('?')[0] || 'video.mp4';
+            fetch(url)
+                .then(response => response.blob())
+                .then(blob => {
+                    const link = document.createElement('a');
+                    link.href = window.URL.createObjectURL(blob);
+                    link.download = filename;
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                });
+        });
+    });
+});
 </script>
 {% endblock %}
