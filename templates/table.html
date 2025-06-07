@@ -1,5 +1,5 @@
 {% macro render_table(table_id, items, headers, download_url, pagination=None, current_sort_by=None,
-current_sort_desc=None) %}
+current_sort_desc=None, page_limit=50) %}
 <!-- Controls outside of the table-responsive area -->
 <div class="mb-3">
     <div class="d-flex justify-content-between align-items-center">
@@ -25,12 +25,12 @@ current_sort_desc=None) %}
 </div>
 
 <div class="mb-3 d-flex justify-content-between align-items-center">
-    <div id="{{ table_id }}_info" class="dataTables_info">Showing up to 50 items per page</div>
+    <div id="{{ table_id }}_info" class="dataTables_info">Showing up to {{ page_limit }} items per page</div>
 </div>
 
 <!-- Table within scrollable area -->
 <div class="table-responsive">
-    <table id="{{ table_id }}" data-table-id="{{ table_id }}" class="table table-bordered table-hover">
+    <table id="{{ table_id }}" data-table-id="{{ table_id }}" data-page-limit="{{ page_limit }}" class="table table-bordered table-hover">
         <thead>
             <tr>
                 {% for header in headers %}
@@ -49,7 +49,8 @@ current_sort_desc=None) %}
                         <img src="{{ item.image_url }}" class="img-fluid detection-img clickable-image"
                             style="max-height: 100px; display: block; cursor: pointer;"
                             data-image-url="{{ item.image_url }}"
-                            data-bbox="{{ bbox|tojson if bbox and bbox|length==4 else 'null' }}">
+                            data-bbox="{{ bbox|tojson if bbox and bbox|length==4 else 'null' }}"
+                            data-timestamp="{{ item.get('formatted_time', item.get('timestamp', '')) }}">
                         <!-- DEBUG: bbox for image_url={{ item.image_url }} is {{ bbox }} -->
 
                         {% if bbox and bbox|length == 4 %}

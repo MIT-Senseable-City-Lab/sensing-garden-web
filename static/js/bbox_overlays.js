@@ -1,4 +1,9 @@
 console.log('=== bbox_overlay_script included ===');
+var modalImages = [];
+var currentModalIndex = -1;
+var prevBtn = null;
+var nextBtn = null;
+var modalTitle = null;
 function drawSvgBbox(img, svg, bbox) {
     if (!bbox || bbox.length !== 4 || (bbox[0] === 0 && bbox[1] === 0 && bbox[2] === 0 && bbox[3] === 0)) return;
     // Use displayed size
@@ -104,18 +109,57 @@ function showModalWithImageAndBbox(imageUrl, bbox) {
     if (modalImg.complete) drawModalBbox();
 }
 
+function showModalForIndex(index) {
+    if (index < 0 || index >= modalImages.length) return;
+    currentModalIndex = index;
+    var img = modalImages[index];
+    var bboxStr = img.getAttribute('data-bbox');
+    var bbox = null;
+    try { if (bboxStr) bbox = JSON.parse(bboxStr); } catch (e) {}
+    showModalWithImageAndBbox(img.getAttribute('data-image-url'), bbox);
+    if (modalTitle) {
+        var ts = img.getAttribute('data-timestamp');
+        modalTitle.textContent = ts ? 'Image Preview - ' + ts : 'Image Preview';
+    }
+    if (prevBtn) {
+        prevBtn.style.display = index <= 0 ? 'none' : 'block';
+    }
+    if (nextBtn) {
+        nextBtn.style.display = index >= modalImages.length - 1 ? 'none' : 'block';
+    }
+    if (window.$ && $('#imageModal').modal) {
+        $('#imageModal').modal('show');
+    }
+}
+
 document.addEventListener('DOMContentLoaded', function () {
     renderBboxOverlays();
-    document.querySelectorAll('.clickable-image').forEach(function (img) {
+    modalTitle = document.getElementById('imageModalLabel');
+    modalImages = Array.from(document.querySelectorAll('.clickable-image'));
+    modalImages.forEach(function (img, idx) {
+        img.dataset.modalIndex = idx;
         img.addEventListener('click', function () {
-            var bboxStr = img.getAttribute('data-bbox');
-            var bbox = null;
-            try { if (bboxStr) bbox = JSON.parse(bboxStr); } catch (e) { }
-            showModalWithImageAndBbox(img.getAttribute('data-image-url'), bbox);
-            if (window.$ && $('#imageModal').modal) {
-                $('#imageModal').modal('show');
-            }
+            showModalForIndex(idx);
         });
     });
+
+    prevBtn = document.getElementById('modal-prev');
+    nextBtn = document.getElementById('modal-next');
+    if (prevBtn) {
+        prevBtn.addEventListener('click', function () {
+            if (currentModalIndex > 0) {
+                showModalForIndex(currentModalIndex - 1);
+            }
+        });
+    }
+    if (nextBtn) {
+        nextBtn.addEventListener('click', function () {
+            if (currentModalIndex < modalImages.length - 1) {
+                showModalForIndex(currentModalIndex + 1);
+            }
+        });
+    }
+
     window.addEventListener('resize', renderBboxOverlays);
 });
+
