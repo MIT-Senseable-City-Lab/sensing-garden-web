@@ -56,12 +56,18 @@ function downloadCurrentImageWithBbox() {
     if (!modalImg || !currentModalImageUrl) return;
     var canvas = document.createElement('canvas');
     drawCanvasBbox(modalImg, canvas, currentModalBbox);
-    var link = document.createElement('a');
-    link.href = canvas.toDataURL('image/png');
-    link.download = 'image_with_bbox.png';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    try {
+        var dataUrl = canvas.toDataURL('image/png');
+        var link = document.createElement('a');
+        link.href = dataUrl;
+        link.download = 'image_with_bbox.png';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    } catch (err) {
+        console.error('Failed to generate image for download', err);
+        alert('Unable to download image. This image may not allow cross-origin access.');
+    }
 }
 
 function renderBboxOverlays() {
@@ -101,7 +107,8 @@ function showModalWithImageAndBbox(imageUrl, bbox) {
     currentModalImageUrl = imageUrl;
     currentModalBbox = bbox;
     
-    // Clear previous image and set new source
+    // Clear previous image and set new source with CORS enabled
+    modalImg.crossOrigin = 'anonymous';
     modalImg.src = '';
     modalImg.src = imageUrl;
     
