@@ -49,7 +49,8 @@ current_sort_desc=None, page_limit=50) %}
                         <img src="{{ item.image_url }}" class="img-fluid detection-img clickable-image"
                             style="max-height: 100px; display: block; cursor: pointer;"
                             data-image-url="{{ item.image_url }}"
-                            data-bbox="{{ bbox|tojson if bbox and bbox|length==4 else 'null' }}">
+                            data-bbox="{{ bbox|tojson if bbox and bbox|length==4 else 'null' }}"
+                            data-timestamp="{{ item.get('formatted_time', item.get('timestamp', '')) }}">
                         <!-- DEBUG: bbox for image_url={{ item.image_url }} is {{ bbox }} -->
 
                         {% if bbox and bbox|length == 4 %}

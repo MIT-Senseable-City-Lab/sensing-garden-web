@@ -3,6 +3,7 @@ var modalImages = [];
 var currentModalIndex = -1;
 var prevBtn = null;
 var nextBtn = null;
+var modalTitle = null;
 function drawSvgBbox(img, svg, bbox) {
     if (!bbox || bbox.length !== 4 || (bbox[0] === 0 && bbox[1] === 0 && bbox[2] === 0 && bbox[3] === 0)) return;
     // Use displayed size
@@ -116,6 +117,10 @@ function showModalForIndex(index) {
     var bbox = null;
     try { if (bboxStr) bbox = JSON.parse(bboxStr); } catch (e) {}
     showModalWithImageAndBbox(img.getAttribute('data-image-url'), bbox);
+    if (modalTitle) {
+        var ts = img.getAttribute('data-timestamp');
+        modalTitle.textContent = ts ? 'Image Preview - ' + ts : 'Image Preview';
+    }
     if (prevBtn) {
         prevBtn.style.display = index <= 0 ? 'none' : 'block';
     }
@@ -129,6 +134,7 @@ function showModalForIndex(index) {
 
 document.addEventListener('DOMContentLoaded', function () {
     renderBboxOverlays();
+    modalTitle = document.getElementById('imageModalLabel');
     modalImages = Array.from(document.querySelectorAll('.clickable-image'));
     modalImages.forEach(function (img, idx) {
         img.dataset.modalIndex = idx;
