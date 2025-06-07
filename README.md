@@ -22,10 +22,10 @@ API_BASE_URL=https://your-api-endpoint.com
 curl -sSL https://install.python-poetry.org | python3 -
 ```
 
-2. Run the setup script to create the Poetry environment:
+2. Run the start script to create the Poetry environment:
 
 ```bash
-./setup.sh
+./start_local.sh
 ```
 
 3. Run the dashboard:
