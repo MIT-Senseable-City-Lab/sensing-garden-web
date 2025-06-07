@@ -160,6 +160,21 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     }
 
+    // Allow arrow key navigation while modal is open
+    document.addEventListener('keydown', function (e) {
+        var modal = document.getElementById('imageModal');
+        if (!modal || !modal.classList.contains('show')) return;
+        if (e.key === 'ArrowLeft') {
+            if (currentModalIndex > 0) {
+                showModalForIndex(currentModalIndex - 1);
+            }
+        } else if (e.key === 'ArrowRight') {
+            if (currentModalIndex < modalImages.length - 1) {
+                showModalForIndex(currentModalIndex + 1);
+            }
+        }
+    });
+
     window.addEventListener('resize', renderBboxOverlays);
 });
 
