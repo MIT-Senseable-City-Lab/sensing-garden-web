@@ -4,6 +4,8 @@ var currentModalIndex = -1;
 var prevBtn = null;
 var nextBtn = null;
 var modalTitle = null;
+var currentModalImageUrl = null;
+var currentModalBbox = null;
 function drawSvgBbox(img, svg, bbox) {
     if (!bbox || bbox.length !== 4 || (bbox[0] === 0 && bbox[1] === 0 && bbox[2] === 0 && bbox[3] === 0)) return;
     // Use displayed size
@@ -32,6 +34,34 @@ function drawSvgBbox(img, svg, bbox) {
     
     // Debug logging
     console.log('[drawSvgBbox] bbox:', bbox, 'img:', displayW, displayH, 'svg:', svg.getAttribute('width'), svg.getAttribute('height'), 'points:', points);
+}
+
+function drawCanvasBbox(img, canvas, bbox) {
+    var ctx = canvas.getContext('2d');
+    canvas.width = img.naturalWidth;
+    canvas.height = img.naturalHeight;
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    if (!bbox || bbox.length !== 4 || (bbox[0] === 0 && bbox[1] === 0 && bbox[2] === 0 && bbox[3] === 0)) return;
+    var xmin = (bbox[0] - bbox[2]/2) * canvas.width;
+    var ymin = (bbox[1] - bbox[3]/2) * canvas.height;
+    var width = bbox[2] * canvas.width;
+    var height = bbox[3] * canvas.height;
+    ctx.strokeStyle = '#ff0000';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(xmin, ymin, width, height);
+}
+
+function downloadCurrentImageWithBbox() {
+    var modalImg = document.getElementById('modal-image');
+    if (!modalImg || !currentModalImageUrl) return;
+    var canvas = document.createElement('canvas');
+    drawCanvasBbox(modalImg, canvas, currentModalBbox);
+    var link = document.createElement('a');
+    link.href = canvas.toDataURL('image/png');
+    link.download = 'image_with_bbox.png';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
 }
 
 function renderBboxOverlays() {
@@ -67,6 +97,9 @@ function showModalWithImageAndBbox(imageUrl, bbox) {
     var modalImg = document.getElementById('modal-image');
     var modalSvg = document.getElementById('modal-bbox-svg');
     var modal = document.getElementById('imageModal');
+
+    currentModalImageUrl = imageUrl;
+    currentModalBbox = bbox;
     
     // Clear previous image and set new source
     modalImg.src = '';
@@ -145,6 +178,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
     prevBtn = document.getElementById('modal-prev');
     nextBtn = document.getElementById('modal-next');
+    var downloadBtn = document.getElementById('modal-download');
     if (prevBtn) {
         prevBtn.addEventListener('click', function () {
             if (currentModalIndex > 0) {
@@ -159,16 +193,21 @@ document.addEventListener('DOMContentLoaded', function () {
             }
         });
     }
+    if (downloadBtn) {
+        downloadBtn.addEventListener('click', downloadCurrentImageWithBbox);
+    }
 
     // Allow arrow key navigation while modal is open
     document.addEventListener('keydown', function (e) {
         var modal = document.getElementById('imageModal');
         if (!modal || !modal.classList.contains('show')) return;
         if (e.key === 'ArrowLeft') {
+            e.preventDefault();
             if (currentModalIndex > 0) {
                 showModalForIndex(currentModalIndex - 1);
             }
         } else if (e.key === 'ArrowRight') {
+            e.preventDefault();
             if (currentModalIndex < modalImages.length - 1) {
                 showModalForIndex(currentModalIndex + 1);
             }
