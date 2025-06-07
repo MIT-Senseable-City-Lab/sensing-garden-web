@@ -100,12 +100,9 @@ def get_field_names(items: List[Dict]) -> List[str]:
 @app.route('/health')
 def health_check():
     """Enhanced health check endpoint for AWS App Runner
-    
+
     This endpoint provides basic diagnostic information and doesn't depend on
     external API connectivity to succeed, ensuring the container health check passes.
-    
-    It also checks for a pre-start file that's created before the Flask app is fully
-    initialized, allowing health checks to pass during startup.
     """
     # Check environment variables without exposing sensitive values
     env_status = {
