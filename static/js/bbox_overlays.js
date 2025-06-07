@@ -52,22 +52,29 @@ function drawCanvasBbox(img, canvas, bbox) {
 }
 
 function downloadCurrentImageWithBbox() {
-    var modalImg = document.getElementById('modal-image');
-    if (!modalImg || !currentModalImageUrl) return;
-    var canvas = document.createElement('canvas');
-    drawCanvasBbox(modalImg, canvas, currentModalBbox);
-    try {
-        var dataUrl = canvas.toDataURL('image/png');
-        var link = document.createElement('a');
-        link.href = dataUrl;
-        link.download = 'image_with_bbox.png';
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-    } catch (err) {
-        console.error('Failed to generate image for download', err);
-        alert('Unable to download image. This image may not allow cross-origin access.');
-    }
+    if (!currentModalImageUrl) return;
+    var tempImg = new Image();
+    tempImg.onload = function () {
+        var canvas = document.createElement('canvas');
+        drawCanvasBbox(tempImg, canvas, currentModalBbox);
+        try {
+            var dataUrl = canvas.toDataURL('image/png');
+            var link = document.createElement('a');
+            link.href = dataUrl;
+            link.download = 'image_with_bbox.png';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        } catch (err) {
+            console.error('Failed to generate image for download', err);
+            alert('Unable to download image. This image may not allow cross-origin access.');
+        }
+    };
+    tempImg.onerror = function (err) {
+        console.error('Failed to load image for download', err);
+        alert('Failed to load image for download.');
+    };
+    tempImg.src = '/image_proxy?url=' + encodeURIComponent(currentModalImageUrl);
 }
 
 function renderBboxOverlays() {
@@ -107,10 +114,10 @@ function showModalWithImageAndBbox(imageUrl, bbox) {
     currentModalImageUrl = imageUrl;
     currentModalBbox = bbox;
     
-    // Use server-side proxy to avoid CORS issues when drawing to canvas
-    modalImg.crossOrigin = 'anonymous';
+    // Load image directly for quick display
+    modalImg.removeAttribute('crossorigin');
     modalImg.src = '';
-    modalImg.src = '/image_proxy?url=' + encodeURIComponent(imageUrl);
+    modalImg.src = imageUrl;
     
     function drawModalBbox() {
         console.log('[showModalWithImageAndBbox] Drawing bbox:', bbox);
