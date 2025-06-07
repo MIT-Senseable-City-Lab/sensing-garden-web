@@ -73,14 +73,24 @@ def fetch_data(
         
         # Add formatted timestamp to each item in a human friendly form
         for item in items:
+            ts_key = None
             if 'timestamp' in item:
+                ts_key = 'timestamp'
+            else:
+                # Fallback if API uses a different case like 'Timestamp'
+                for key in item.keys():
+                    if key.lower() == 'timestamp':
+                        ts_key = key
+                        break
+
+            if ts_key:
                 try:
-                    timestamp = datetime.fromisoformat(item['timestamp'].replace('Z', '+00:00'))
+                    timestamp = datetime.fromisoformat(str(item[ts_key]).replace('Z', '+00:00'))
                     # Example format: "May 21, 2024 01:23:45 PM"
                     item['formatted_time'] = timestamp.strftime('%b %d, %Y %I:%M:%S %p')
                 except (ValueError, TypeError) as e:
-                    print(f"Error formatting timestamp {item.get('timestamp')}: {str(e)}")
-                    item['formatted_time'] = item.get('timestamp', '')
+                    print(f"Error formatting timestamp {item.get(ts_key)}: {str(e)}")
+                    item['formatted_time'] = item.get(ts_key, '')
         
         return {'items': items, 'next_token': next_token}
     except Exception as e:
