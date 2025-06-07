@@ -31,9 +31,6 @@ function drawSvgBbox(img, svg, bbox) {
     const points = `${xmin},${ymin} ${xmax},${ymin} ${xmax},${ymax} ${xmin},${ymax}`;
     const poly = svg.querySelector('polygon');
     if (poly) poly.setAttribute('points', points);
-    
-    // Debug logging
-    console.log('[drawSvgBbox] bbox:', bbox, 'img:', displayW, displayH, 'svg:', svg.getAttribute('width'), svg.getAttribute('height'), 'points:', points);
 }
 
 function drawCanvasBbox(img, canvas, bbox) {
