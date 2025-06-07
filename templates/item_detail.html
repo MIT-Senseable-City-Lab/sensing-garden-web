@@ -26,7 +26,7 @@
                     
                     {% if item.timestamp %}
                     <dt>Timestamp</dt>
-                    <dd>{{ item.timestamp }}</dd>
+                    <dd>{{ item.get('formatted_time', item.timestamp) }}</dd>
                     {% endif %}
                     
                     {% if item.species %}

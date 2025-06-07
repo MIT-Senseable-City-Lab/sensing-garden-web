@@ -71,14 +71,13 @@ def fetch_data(
         items = response.get('items', [])
         next_token = response.get('next_token', None)
         
-        # Add formatted timestamp to each item
+        # Add formatted timestamp to each item in a human friendly form
         for item in items:
             if 'timestamp' in item:
                 try:
-                    # Assuming ISO 8601 format
                     timestamp = datetime.fromisoformat(item['timestamp'].replace('Z', '+00:00'))
-                    # Format timestamp for display
-                    item['formatted_time'] = timestamp.strftime('%Y-%m-%d %H:%M:%S')
+                    # Example format: "May 21, 2024 01:23:45 PM"
+                    item['formatted_time'] = timestamp.strftime('%b %d, %Y %I:%M:%S %p')
                 except (ValueError, TypeError) as e:
                     print(f"Error formatting timestamp {item.get('timestamp')}: {str(e)}")
                     item['formatted_time'] = item.get('timestamp', '')
