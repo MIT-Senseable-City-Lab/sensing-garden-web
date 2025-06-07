@@ -7,7 +7,8 @@ from typing import Any, Dict, List, Optional
 
 from dotenv import load_dotenv
 from flask import (Flask, jsonify, make_response, redirect, render_template,
-                   request, url_for)
+                  request, url_for)
+import requests
 from sensing_garden_client import SensingGardenClient
 
 # Load environment variables
@@ -542,6 +543,32 @@ def download_csv(table_type):
         return response
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/image_proxy')
+def image_proxy():
+    """Fetch an image from a remote URL and return it with same-origin headers."""
+    url = request.args.get('url')
+    if not url:
+        return jsonify({'error': 'url parameter required'}), 400
+
+    # Limit proxying to S3 URLs to avoid abuse
+    allowed_prefix = 'https://scl-sensing-garden-images.s3.amazonaws.com/'
+    if not url.startswith(allowed_prefix):
+        return jsonify({'error': 'URL not allowed'}), 400
+
+    try:
+        resp = requests.get(url, timeout=10)
+        if resp.status_code != 200:
+            return jsonify({'error': 'Failed to fetch image'}), resp.status_code
+        proxy_resp = make_response(resp.content)
+        content_type = resp.headers.get('Content-Type', 'image/jpeg')
+        proxy_resp.headers['Content-Type'] = content_type
+        # Explicitly allow the browser to use this image in canvas
+        proxy_resp.headers['Access-Control-Allow-Origin'] = '*'
+        return proxy_resp
+    except requests.RequestException as exc:
+        return jsonify({'error': str(exc)}), 500
 
 @app.route('/add_model', methods=['GET'])
 def add_model():

@@ -107,10 +107,10 @@ function showModalWithImageAndBbox(imageUrl, bbox) {
     currentModalImageUrl = imageUrl;
     currentModalBbox = bbox;
     
-    // Clear previous image and set new source with CORS enabled
+    // Use server-side proxy to avoid CORS issues when drawing to canvas
     modalImg.crossOrigin = 'anonymous';
     modalImg.src = '';
-    modalImg.src = imageUrl;
+    modalImg.src = '/image_proxy?url=' + encodeURIComponent(imageUrl);
     
     function drawModalBbox() {
         console.log('[showModalWithImageAndBbox] Drawing bbox:', bbox);
