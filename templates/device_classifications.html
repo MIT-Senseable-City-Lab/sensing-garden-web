@@ -7,12 +7,21 @@
 {% block content %}
 <div class="container">
     <h2>Device {{ device_id }} Classifications</h2>
+    <div class="mb-3">
+        <label for="limitSelect">Items per page:</label>
+        <select id="limitSelect" class="form-control d-inline-block w-auto ml-2" onchange="changeLimit(this.value)">
+            {% for option in [50, 100, 200, 500] %}
+            <option value="{{ option }}" {% if limit == option %}selected{% endif %}>{{ option }}</option>
+            {% endfor %}
+        </select>
+    </div>
     {% set display_fields = fields + ['formatted_time'] if 'formatted_time' not in fields else fields %}
     {{ render_table('classificationsTable', classifications, display_fields,
-    url_for('download_csv', table_type='classifications', device_id=device_id), pagination) }}
+    url_for('download_csv', table_type='classifications', device_id=device_id), pagination, limit) }}
 </div>
 {% endblock %}
 
 {% block scripts %}
 {{ table_scripts('classificationsTable') }}
+<script src="{{ url_for('static', filename='js/table_scripts.js') }}"></script>
 {% endblock %}
