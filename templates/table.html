@@ -1,25 +1,9 @@
-{% macro render_table(table_id, items, headers, download_url, pagination=None, current_sort_by=None,
-current_sort_desc=None, page_limit=50) %}
+{% macro render_table(table_id, items, headers, download_url, pagination=None, page_limit=50) %}
 <!-- Controls outside of the table-responsive area -->
 <div class="mb-3">
     <div class="d-flex justify-content-between align-items-center">
         <div>
             <a href="{{ download_url }}" target="_blank" class="btn btn-secondary">Download CSV</a>
-        </div>
-        <div>
-            <select class="form-control sort-select" id="{{ table_id }}_sort" data-table-id="{{ table_id }}">
-                <option value="">Sort by...</option>
-                {% for field in headers %}
-                <option value="{{ field }}_asc" {% if current_sort_by==field and not current_sort_desc %}selected{%
-                    endif %}>
-                    {{ field }} (Ascending)
-                </option>
-                <option value="{{ field }}_desc" {% if current_sort_by==field and current_sort_desc %}selected{% endif
-                    %}>
-                    {{ field }} (Descending)
-                </option>
-                {% endfor %}
-            </select>
         </div>
     </div>
 </div>
@@ -27,7 +11,6 @@ current_sort_desc=None, page_limit=50) %}
 <div class="mb-3 d-flex justify-content-between align-items-center">
     <div id="{{ table_id }}_info" class="dataTables_info">Showing up to {{ page_limit }} items per page</div>
 </div>
-
 <!-- Table within scrollable area -->
 <div class="table-responsive">
     <table id="{{ table_id }}" data-table-id="{{ table_id }}" data-page-limit="{{ page_limit }}" class="table table-bordered table-hover">

@@ -45,12 +45,10 @@ function downloadCSV(url) {
     window.open(url, '_blank');
 }
 
-function sortTable(tableId, value) {
+function changeLimit(value) {
     if (!value) return;
-    const [field, order] = value.split('_');
     const currentUrl = new URL(window.location.href);
-    currentUrl.searchParams.set('sort_by', field);
-    currentUrl.searchParams.set('sort_desc', order === 'desc');
+    currentUrl.searchParams.set('limit', value);
     currentUrl.searchParams.delete('next_token');
     currentUrl.searchParams.delete('prev_token');
     currentUrl.searchParams.set('page', '1');

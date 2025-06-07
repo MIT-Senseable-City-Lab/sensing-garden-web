@@ -10,8 +10,7 @@
     {% if detections %}
     {% set display_fields = detections[0].keys()|sort %}
     {{ render_table('detectionsTable', detections, display_fields,
-    url_for('download_csv', table_type='detections', device_id=device_id), pagination,
-    request.args.get('sort_by'), request.args.get('sort_order')) }}
+    url_for('download_csv', table_type='detections', device_id=device_id), pagination) }}
     {% else %}
     {% endif %}
 </div>
