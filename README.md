@@ -89,6 +89,29 @@ To add new dependencies to the project:
 poetry add package-name
 ```
 
+### Running Tests
+
+First install dependencies (if not already done):
+
+```bash
+poetry install --no-root
+```
+
+Run the test suite using Poetry's virtual environment:
+
+```bash
+poetry run pytest -q
+```
+
+### Health Check Endpoint
+
+After starting the dashboard you can verify that it is running by hitting the
+`/health` endpoint:
+
+```bash
+curl http://localhost:8080/health
+```
+
 ### Deploying to AWS AppRunner
 
 This application is configured to be deployable to AWS AppRunner. The Docker container setup provides the necessary configuration for cloud deployment.
