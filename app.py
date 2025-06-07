@@ -35,15 +35,7 @@ def fetch_data(
 ) -> Dict[str, Any]:
     """Fetch data from the API for a specific table with pagination support."""
     try:
-        if table_type == 'detections':
-            response = client.detections.fetch(
-                device_id=device_id,
-                limit=limit,
-                next_token=next_token,
-                sort_by=sort_by,
-                sort_desc=sort_desc
-            )
-        elif table_type == 'classifications':
+        if table_type == 'classifications':
             response = client.classifications.fetch(
                 device_id=device_id,
                 limit=limit,
@@ -154,108 +146,32 @@ def view_device(device_id):
     token_history = request.args.get('token_history', '')
     
     try:
-        # Use count() for detections, classifications, and videos
-        detections_count = str(client.detections.count(device_id=device_id))
         classifications_count = str(client.classifications.count(device_id=device_id))
         videos_count = str(client.videos.count(device_id=device_id))
 
-        # Fetch detection and classification content for the selected device (for table display)
-        detection_response = client.detections.fetch(
-            device_id=device_id,
-            limit=50,
-            next_token=next_token
-        )
         classification_response = client.classifications.fetch(
             device_id=device_id,
             limit=50,
             next_token=next_token
         )
-        # Get field names directly from the data
-        detection_fields = []
         classification_fields = []
-        
-        if detection_response.get('items'):
-            detection_fields = list(detection_response['items'][0].keys())
         if classification_response.get('items'):
             classification_fields = list(classification_response['items'][0].keys())
-        
-        return render_template('device_content.html', 
-                               device_id=device_id, 
-                               detections=detection_response['items'],
-                               classifications=classification_response['items'],
-                               detection_fields=detection_fields,
-                               classification_fields=classification_fields,
-                               next_token=detection_response.get('next_token'),  # Use detection token as primary
-                               prev_token=prev_token,
-                               token_history=token_history,
-                               detections_count=detections_count,
-                               classifications_count=classifications_count,
-                               videos_count=videos_count)
+
+        return render_template(
+            'device_content.html',
+            device_id=device_id,
+            classifications=classification_response['items'],
+            classification_fields=classification_fields,
+            next_token=classification_response.get('next_token'),
+            prev_token=prev_token,
+            token_history=token_history,
+            classifications_count=classifications_count,
+            videos_count=videos_count,
+        )
     except Exception as e:
         return render_template('error.html', error=str(e))
 
-@app.route('/view_device/<device_id>/detections')
-def view_device_detections(device_id):
-    # Get pagination token from request if available
-    next_token = request.args.get('next_token', None)
-    prev_token = request.args.get('prev_token', None)
-    
-    # Track page tokens for Previous button
-    token_history = request.args.get('token_history', '')
-    current_page = int(request.args.get('page', '1'))
-    
-    # Process token history
-    token_list = token_history.split(',') if token_history else []
-    
-    # Get sort parameters
-    sort_by = request.args.get('sort_by', None)
-    sort_desc = request.args.get('sort_desc', 'false') == 'true'
-    
-    # Fetch detection content for the selected device with pagination and sorting
-    result = fetch_data('detections', device_id=device_id, next_token=next_token, sort_by=sort_by, sort_desc=sort_desc)
-    print(f"Fetched detections for device {device_id}, next_token: {next_token}, page: {current_page}, sort_by: {sort_by}, sort_desc: {sort_desc}")
-    
-    # Get field names directly from the data
-    fields = get_field_names(result['items'])
-    if 'formatted_time' not in fields and 'timestamp' in fields:
-        fields.append('formatted_time')  # Add formatted_time for display purposes
-    
-    # Update token history if moving forward and we have items
-    if next_token and next_token not in token_list and result['items']:
-        if current_page > len(token_list):
-            token_list.append(next_token)
-    
-    # Get previous token (if we're not on the first page)
-    prev_url = None
-    if current_page > 1:
-        if current_page == 2:  # Going back to first page
-            prev_url = url_for('view_device_detections', device_id=device_id, page=1)
-        else:  # Going back to previous page
-            prev_token = token_list[current_page-3] if current_page > 2 and len(token_list) >= current_page-2 else None
-            prev_url = url_for('view_device_detections', 
-                              device_id=device_id, 
-                              next_token=prev_token,
-                              token_history=','.join(token_list[:current_page-2]),
-                              page=current_page-1)
-    
-    # Generate pagination URLs
-    next_page_token = result['next_token']
-    pagination = {
-        'has_next': next_page_token is not None,
-        'next_url': url_for('view_device_detections', 
-                           device_id=device_id, 
-                           next_token=next_page_token,
-                           token_history=','.join(token_list),
-                           page=current_page+1) if next_page_token else None,
-        'has_prev': current_page > 1,
-        'prev_url': prev_url
-    }
-    
-    return render_template('device_detections.html', 
-                           device_id=device_id, 
-                           detections=result['items'],
-                           fields=fields,
-                           pagination=pagination)
 
 @app.route('/view_device/<device_id>/classifications')
 def view_device_classifications(device_id):
@@ -394,11 +310,11 @@ def view_device_classifications(device_id):
 @app.route('/view_table/<table_type>')
 def view_table(table_type):
     """Generic route handler for viewing any table with pagination and sorting"""
-    if table_type not in ['detections', 'classifications', 'models']:
+    if table_type not in ['classifications', 'models']:
         return redirect(url_for('index'))
-    
-    # For detections and classifications, redirect to device-specific view
-    if table_type in ['detections', 'classifications']:
+
+    # For classifications, redirect to device-specific view
+    if table_type == 'classifications':
         device_id = request.args.get('device_id')
         if not device_id:
             return redirect(url_for('index'))
@@ -457,11 +373,6 @@ def view_item(table_type, timestamp):
         # Try to fetch the individual item
         if table_type == 'models':
             item = client.models.get(timestamp)
-        elif table_type == 'detections':
-            device_id = request.args.get('device_id')
-            if not device_id:
-                return jsonify({'error': 'device_id is required for detections'}), 400
-            item = client.detections.get(device_id, timestamp)
         elif table_type == 'classifications':
             device_id = request.args.get('device_id')
             if not device_id:
@@ -489,15 +400,7 @@ def download_csv(table_type):
     """Download table data as CSV"""
     try:
         # Fetch all data without pagination
-        if table_type == 'detections':
-            device_id = request.args.get('device_id')
-            if not device_id:
-                return jsonify({'error': 'device_id is required for detections'}), 400
-            response = client.detections.fetch(
-                device_id=device_id,
-                limit=1000  # Fetch more data for download
-            )
-        elif table_type == 'classifications':
+        if table_type == 'classifications':
             device_id = request.args.get('device_id')
             if not device_id:
                 return jsonify({'error': 'device_id is required for classifications'}), 400
