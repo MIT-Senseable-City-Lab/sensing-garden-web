@@ -1,4 +1,6 @@
 console.log('=== bbox_overlay_script included ===');
+var modalImages = [];
+var currentModalIndex = -1;
 function drawSvgBbox(img, svg, bbox) {
     if (!bbox || bbox.length !== 4 || (bbox[0] === 0 && bbox[1] === 0 && bbox[2] === 0 && bbox[3] === 0)) return;
     // Use displayed size
@@ -104,18 +106,53 @@ function showModalWithImageAndBbox(imageUrl, bbox) {
     if (modalImg.complete) drawModalBbox();
 }
 
+function showModalForIndex(index) {
+    if (index < 0 || index >= modalImages.length) return;
+    currentModalIndex = index;
+    var img = modalImages[index];
+    var bboxStr = img.getAttribute('data-bbox');
+    var bbox = null;
+    try { if (bboxStr) bbox = JSON.parse(bboxStr); } catch (e) {}
+    showModalWithImageAndBbox(img.getAttribute('data-image-url'), bbox);
+    if (window.$ && $('#imageModal').modal) {
+        $('#imageModal').modal('show');
+    }
+}
+
 document.addEventListener('DOMContentLoaded', function () {
     renderBboxOverlays();
-    document.querySelectorAll('.clickable-image').forEach(function (img) {
+    modalImages = Array.from(document.querySelectorAll('.clickable-image'));
+    modalImages.forEach(function (img, idx) {
+        img.dataset.modalIndex = idx;
         img.addEventListener('click', function () {
             var bboxStr = img.getAttribute('data-bbox');
             var bbox = null;
-            try { if (bboxStr) bbox = JSON.parse(bboxStr); } catch (e) { }
+            currentModalIndex = idx;
+            try { if (bboxStr) bbox = JSON.parse(bboxStr); } catch (e) {}
             showModalWithImageAndBbox(img.getAttribute('data-image-url'), bbox);
             if (window.$ && $('#imageModal').modal) {
                 $('#imageModal').modal('show');
             }
         });
     });
+
+    var prevBtn = document.getElementById('modal-prev');
+    var nextBtn = document.getElementById('modal-next');
+    if (prevBtn) {
+        prevBtn.addEventListener('click', function () {
+            if (modalImages.length === 0) return;
+            var newIndex = (currentModalIndex - 1 + modalImages.length) % modalImages.length;
+            showModalForIndex(newIndex);
+        });
+    }
+    if (nextBtn) {
+        nextBtn.addEventListener('click', function () {
+            if (modalImages.length === 0) return;
+            var newIndex = (currentModalIndex + 1) % modalImages.length;
+            showModalForIndex(newIndex);
+        });
+    }
+
     window.addEventListener('resize', renderBboxOverlays);
 });
+

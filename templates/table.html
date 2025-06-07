@@ -1,5 +1,5 @@
 {% macro render_table(table_id, items, headers, download_url, pagination=None, current_sort_by=None,
-current_sort_desc=None) %}
+current_sort_desc=None, page_limit=50) %}
 <!-- Controls outside of the table-responsive area -->
 <div class="mb-3">
     <div class="d-flex justify-content-between align-items-center">
@@ -25,7 +25,7 @@ current_sort_desc=None) %}
 </div>
 
 <div class="mb-3 d-flex justify-content-between align-items-center">
-    <div id="{{ table_id }}_info" class="dataTables_info">Showing up to 50 items per page</div>
+    <div id="{{ table_id }}_info" class="dataTables_info">Showing up to {{ page_limit }} items per page</div>
 </div>
 
 <!-- Table within scrollable area -->

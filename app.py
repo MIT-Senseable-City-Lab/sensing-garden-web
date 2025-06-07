@@ -24,10 +24,15 @@ client = SensingGardenClient(
     aws_region=os.getenv('AWS_REGION')
 )
 
-def fetch_data(table_type: str, device_id: Optional[str] = None, next_token: Optional[str] = None, sort_by: Optional[str] = None, sort_desc: Optional[bool] = False) -> Dict[str, Any]:
-    """Fetch data from the API for a specific table with pagination support"""
-    # Hardcoded limit of 50 items per page
-    limit: int = 50
+def fetch_data(
+    table_type: str,
+    device_id: Optional[str] = None,
+    next_token: Optional[str] = None,
+    sort_by: Optional[str] = None,
+    sort_desc: Optional[bool] = False,
+    limit: int = 50,
+) -> Dict[str, Any]:
+    """Fetch data from the API for a specific table with pagination support."""
     try:
         if table_type == 'detections':
             response = client.detections.fetch(
@@ -267,19 +272,48 @@ def view_device_classifications(device_id):
     # Process token history
     token_list = token_history.split(',') if token_history else []
     
-    # Get sort parameters
-    sort_by = request.args.get('sort_by', None)
-    sort_desc = request.args.get('sort_desc', 'false') == 'true'
+    # Get sort parameters - default to timestamp descending
+    sort_by = request.args.get('sort_by')
+    sort_desc_param = request.args.get('sort_desc')
+    if sort_by is None:
+        sort_by = 'timestamp'
+    if sort_desc_param is None:
+        sort_desc = True
+    else:
+        sort_desc = sort_desc_param.lower() == 'true'
+
+    # Get limit parameter with a maximum of 500 items per page
+    try:
+        limit = int(request.args.get('limit', '50'))
+    except ValueError:
+        limit = 50
+    if limit < 1:
+        limit = 1
+    elif limit > 500:
+        limit = 500
     
     # Fetch classification content for the selected device with pagination and sorting
-    result = fetch_data('classifications', device_id=device_id, next_token=next_token, sort_by=sort_by, sort_desc=sort_desc)
+    result = fetch_data(
+        'classifications',
+        device_id=device_id,
+        next_token=next_token,
+        sort_by=sort_by,
+        sort_desc=sort_desc,
+        limit=limit,
+    )
     print(f"Fetched classifications for device {device_id}, next_token: {next_token}, page: {current_page}, sort_by: {sort_by}, sort_desc: {sort_desc}")
     
     # If we got empty results but we're using a next_token, try without the token
     # This handles the case where the token might be expired or invalid
     if not result['items'] and next_token and current_page > 1:
         print(f"No items found with token, trying without token for page {current_page}")
-        result = fetch_data('classifications', device_id=device_id, sort_by=sort_by, sort_desc=sort_desc)
+        result = fetch_data(
+            'classifications',
+            device_id=device_id,
+            sort_by=sort_by,
+            sort_desc=sort_desc,
+            limit=limit,
+        )
     
     # Get field names directly from the data
     fields = get_field_names(result['items'])
@@ -295,38 +329,69 @@ def view_device_classifications(device_id):
     prev_url = None
     if current_page > 1:
         if current_page == 2:  # Going back to first page
-            prev_url = url_for('view_device_classifications', device_id=device_id, page=1)
+            prev_url = url_for(
+                'view_device_classifications',
+                device_id=device_id,
+                page=1,
+                sort_by=sort_by,
+                sort_desc=str(sort_desc).lower(),
+                limit=limit,
+            )
         else:  # Going back to previous page
             # More robust previous token logic
-            if current_page > 2 and len(token_list) >= current_page-2:
-                prev_token = token_list[current_page-3]
-                prev_url = url_for('view_device_classifications',
-                                  device_id=device_id,
-                                  next_token=prev_token,
-                                  token_history=','.join(token_list[:current_page-2]),
-                                  page=current_page-1)
+            if current_page > 2 and len(token_list) >= current_page - 2:
+                prev_token = token_list[current_page - 3]
+                prev_url = url_for(
+                    'view_device_classifications',
+                    device_id=device_id,
+                    next_token=prev_token,
+                    token_history=','.join(token_list[: current_page - 2]),
+                    page=current_page - 1,
+                    sort_by=sort_by,
+                    sort_desc=str(sort_desc).lower(),
+                    limit=limit,
+                )
             else:
                 # Fallback to page 1 if we can't determine the exact previous token
-                prev_url = url_for('view_device_classifications', device_id=device_id, page=1)
+                prev_url = url_for(
+                    'view_device_classifications',
+                    device_id=device_id,
+                    page=1,
+                    sort_by=sort_by,
+                    sort_desc=str(sort_desc).lower(),
+                    limit=limit,
+                )
     
     # Generate pagination URLs
     next_page_token = result['next_token']
     pagination = {
         'has_next': next_page_token is not None,
-        'next_url': url_for('view_device_classifications', 
-                           device_id=device_id, 
-                           next_token=next_page_token,
-                           token_history=','.join(token_list),
-                           page=current_page+1) if next_page_token else None,
+        'next_url': url_for(
+            'view_device_classifications',
+            device_id=device_id,
+            next_token=next_page_token,
+            token_history=','.join(token_list),
+            page=current_page + 1,
+            sort_by=sort_by,
+            sort_desc=str(sort_desc).lower(),
+            limit=limit,
+        )
+        if next_page_token
+        else None,
         'has_prev': current_page > 1,
         'prev_url': prev_url
     }
     
-    return render_template('device_classifications.html', 
-                           device_id=device_id, 
-                           classifications=result['items'],
-                           fields=fields,
-                           pagination=pagination)
+    return render_template(
+        'device_classifications.html',
+        device_id=device_id,
+        classifications=result['items'],
+        fields=fields,
+        pagination=pagination,
+        current_sort_by=sort_by,
+        current_sort_desc=sort_desc,
+        limit=limit,
+    )
 
 @app.route('/view_table/<table_type>')
 def view_table(table_type):
