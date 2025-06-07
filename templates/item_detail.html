@@ -24,9 +24,9 @@
                     <dd>{{ item.model_id }}</dd>
                     {% endif %}
                     
-                    {% if item.timestamp or item.get('Timestamp') %}
+                    {% if item.timestamp %}
                     <dt>Timestamp</dt>
-                    <dd>{{ item.get('formatted_time', item.get('timestamp', item.get('Timestamp'))) }}</dd>
+                    <dd>{{ item.timestamp }}</dd>
                     {% endif %}
                     
                     {% if item.species %}

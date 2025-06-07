@@ -49,15 +49,11 @@
                     <a href="{{ item.image_url }}" target="_blank" class="btn btn-sm btn-outline-primary ml-2">View</a>
                     {% endif %}
                     {% else %}
-                    {% if header|lower == 'timestamp' %}
-                    {{ item.get('formatted_time', item.get(header, '')) }}
-                    {% else %}
                     {% set value = item.get(header, '') %}
                     {% if value is number and value is float %}
                     {{ '{:.4f}'.format(value) }}
                     {% else %}
                     {{ value }}
-                    {% endif %}
                     {% endif %}
                     {% endif %}
                 </td>

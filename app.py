@@ -71,26 +71,17 @@ def fetch_data(
         items = response.get('items', [])
         next_token = response.get('next_token', None)
         
-        # Add formatted timestamp to each item in a human friendly form
+        # Add formatted timestamp to each item
         for item in items:
-            ts_key = None
             if 'timestamp' in item:
-                ts_key = 'timestamp'
-            else:
-                # Fallback if API uses a different case like 'Timestamp'
-                for key in item.keys():
-                    if key.lower() == 'timestamp':
-                        ts_key = key
-                        break
-
-            if ts_key:
                 try:
-                    timestamp = datetime.fromisoformat(str(item[ts_key]).replace('Z', '+00:00'))
-                    # Example format: "May 21, 2024 01:23:45 PM"
-                    item['formatted_time'] = timestamp.strftime('%b %d, %Y %I:%M:%S %p')
+                    # Assuming ISO 8601 format
+                    timestamp = datetime.fromisoformat(item['timestamp'].replace('Z', '+00:00'))
+                    # Format timestamp for display
+                    item['formatted_time'] = timestamp.strftime('%Y-%m-%d %H:%M:%S')
                 except (ValueError, TypeError) as e:
-                    print(f"Error formatting timestamp {item.get(ts_key)}: {str(e)}")
-                    item['formatted_time'] = item.get(ts_key, '')
+                    print(f"Error formatting timestamp {item.get('timestamp')}: {str(e)}")
+                    item['formatted_time'] = item.get('timestamp', '')
         
         return {'items': items, 'next_token': next_token}
     except Exception as e:
@@ -102,11 +93,7 @@ def get_field_names(items: List[Dict]) -> List[str]:
     if not items:
         return []
     # Get all keys from the first item
-    field_names = list(items[0].keys()) if items else []
-    # Exclude helper fields like formatted_time
-    if 'formatted_time' in field_names:
-        field_names.remove('formatted_time')
-    return field_names
+    return list(items[0].keys()) if items else []
 
 @app.route('/health')
 def health_check():
@@ -244,6 +231,10 @@ def view_device_classifications(device_id):
     
     # Get field names directly from the data
     fields = get_field_names(result['items'])
+    if 'formatted_time' not in fields and 'timestamp' in fields:
+        fields.append('formatted_time')  # Add formatted_time for display purposes
+    if 'formatted_time' not in fields and 'timestamp' in fields:
+        fields.append('formatted_time')  # Add formatted_time for display purposes
     
     # Update token history if moving forward and we have items
     if next_token and next_token not in token_list and result['items']:
@@ -353,7 +344,7 @@ def view_table(table_type):
                                   token_history='')
         
         # Get field names from the first model
-        field_names = get_field_names(models_response['items'])
+        field_names = list(models_response['items'][0].keys())
         
         # Get sort parameters for template
         sort_by = request.args.get('sort_by')
