@@ -446,6 +446,14 @@ def download_csv(table_type):
             response = client.models.fetch(
                 limit=1000  # Fetch more data for download
             )
+        elif table_type == 'videos':
+            device_id = request.args.get('device_id')
+            if not device_id:
+                return jsonify({'error': 'device_id is required for videos'}), 400
+            response = client.videos.fetch(
+                device_id=device_id,
+                limit=1000  # Fetch more data for download
+            )
         else:
             return jsonify({'error': 'Invalid table type'}), 400
         
@@ -574,7 +582,7 @@ def view_device_videos(device_id):
     }
     
     # Create download URL
-    download_url = url_for('download_csv', table_type=f"videos_{device_id}")
+    download_url = url_for('download_csv', table_type='videos', device_id=device_id)
     
     return render_template('videos.html', 
                            device_id=device_id, 
