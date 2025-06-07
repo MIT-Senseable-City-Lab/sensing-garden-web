@@ -29,7 +29,7 @@
 
     {{ render_table('modelsTable', models, field_names,
     url_for('download_csv', table_type='models', device_id=None), pagination,
-    request.args.get('sort_by'), request.args.get('sort_order')) }}
+    request.args.get('sort_by'), request.args.get('sort_desc') == 'true') }}
 
     {% else %}
     <div class="alert alert-info">
