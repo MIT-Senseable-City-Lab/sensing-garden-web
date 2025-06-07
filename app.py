@@ -233,6 +233,8 @@ def view_device_classifications(device_id):
     fields = get_field_names(result['items'])
     if 'formatted_time' not in fields and 'timestamp' in fields:
         fields.append('formatted_time')  # Add formatted_time for display purposes
+    if 'formatted_time' not in fields and 'timestamp' in fields:
+        fields.append('formatted_time')  # Add formatted_time for display purposes
     
     # Update token history if moving forward and we have items
     if next_token and next_token not in token_list and result['items']:
@@ -535,8 +537,6 @@ def view_device_videos(device_id):
     
     # Get field names directly from the data
     fields = get_field_names(result['items'])
-    if 'formatted_time' not in fields and 'timestamp' in fields:
-        fields.append('formatted_time')  # Add formatted_time for display purposes
     
     # Update token history if moving forward and we have items
     if next_token and next_token not in token_list and result['items']:
