@@ -92,7 +92,11 @@ def get_field_names(items: List[Dict]) -> List[str]:
     if not items:
         return []
     # Get all keys from the first item
-    return list(items[0].keys()) if items else []
+    field_names = list(items[0].keys()) if items else []
+    # Exclude helper fields like formatted_time
+    if 'formatted_time' in field_names:
+        field_names.remove('formatted_time')
+    return field_names
 
 @app.route('/health')
 def health_check():
@@ -230,8 +234,6 @@ def view_device_classifications(device_id):
     
     # Get field names directly from the data
     fields = get_field_names(result['items'])
-    if 'formatted_time' not in fields and 'timestamp' in fields:
-        fields.append('formatted_time')  # Add formatted_time for display purposes
     
     # Update token history if moving forward and we have items
     if next_token and next_token not in token_list and result['items']:
@@ -341,7 +343,7 @@ def view_table(table_type):
                                   token_history='')
         
         # Get field names from the first model
-        field_names = list(models_response['items'][0].keys())
+        field_names = get_field_names(models_response['items'])
         
         # Get sort parameters for template
         sort_by = request.args.get('sort_by')
@@ -534,8 +536,6 @@ def view_device_videos(device_id):
     
     # Get field names directly from the data
     fields = get_field_names(result['items'])
-    if 'formatted_time' not in fields and 'timestamp' in fields:
-        fields.append('formatted_time')  # Add formatted_time for display purposes
     
     # Update token history if moving forward and we have items
     if next_token and next_token not in token_list and result['items']:
