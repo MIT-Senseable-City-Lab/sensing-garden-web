@@ -54,3 +54,13 @@ function changeLimit(value) {
     currentUrl.searchParams.set('page', '1');
     window.location.href = currentUrl.toString();
 }
+
+function changeLimit(value) {
+    if (!value) return;
+    const currentUrl = new URL(window.location.href);
+    currentUrl.searchParams.set('limit', value);
+    currentUrl.searchParams.delete('next_token');
+    currentUrl.searchParams.delete('prev_token');
+    currentUrl.searchParams.set('page', '1');
+    window.location.href = currentUrl.toString();
+}
