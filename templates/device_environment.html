@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+
+{% block title %}Device {{ device_id }} Environmental Data{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <h2>Environmental Data for Device {{ device_id }}</h2>
+    
+    <!-- Download CSV button -->
+    <div class="mb-3">
+        <a href="{{ url_for('download_csv', table_type='environment', device_id=device_id) }}" class="btn btn-secondary btn-sm">Download Current Page as CSV</a>
+        <a href="{{ url_for('view_device', device_id=device_id) }}" class="btn btn-primary btn-sm">Back to Device Overview</a>
+    </div>
+    
+    {% if classifications %}
+    <!-- Table using the same structure as device_classifications.html -->
+    {% include 'table.html' %}
+    {% else %}
+    <div class="alert alert-info">
+        <strong>No environmental data found for this device.</strong>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

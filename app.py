@@ -64,6 +64,14 @@ def fetch_data(
             except Exception as fetch_exc:
                 print(f"[ERROR] Exception in client.videos.fetch: {fetch_exc}")
                 raise
+        elif table_type == 'environment':
+            response = client.environment.fetch(
+                device_id=device_id,
+                limit=limit,
+                next_token=next_token,
+                sort_by=sort_by,
+                sort_desc=sort_desc
+            )
         else:
             return {'items': [], 'next_token': None}
         
@@ -148,6 +156,10 @@ def view_device(device_id):
     try:
         classifications_count = str(client.classifications.count(device_id=device_id))
         videos_count = str(client.videos.count(device_id=device_id))
+        try:
+            environment_count = str(client.environment.count(device_id=device_id))
+        except AttributeError:
+            environment_count = "0"
 
         classification_response = client.classifications.fetch(
             device_id=device_id,
@@ -168,6 +180,7 @@ def view_device(device_id):
             token_history=token_history,
             classifications_count=classifications_count,
             videos_count=videos_count,
+            environment_count=environment_count,
         )
     except Exception as e:
         return render_template('error.html', error=str(e))
@@ -397,6 +410,178 @@ def view_item(table_type, timestamp):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/view_device/<device_id>/environment')
+def view_device_environment(device_id):
+    """View environmental data for a device with pagination and sorting"""
+    # Get pagination token from request if available
+    next_token = request.args.get('next_token', None)
+    prev_token = request.args.get('prev_token', None)
+    
+    # Track page tokens for Previous button
+    token_history = request.args.get('token_history', '')
+    current_page = int(request.args.get('page', '1'))
+    
+    # Process token history
+    token_list = token_history.split(',') if token_history else []
+    
+    # Get sort parameters - default to timestamp descending
+    sort_by = request.args.get('sort_by')
+    sort_desc_param = request.args.get('sort_desc')
+    if sort_by is None:
+        sort_by = 'timestamp'
+    if sort_desc_param is None:
+        sort_desc = True
+    else:
+        sort_desc = sort_desc_param.lower() == 'true'
+
+    # Get limit parameter with a maximum of 500 items per page
+    try:
+        limit = int(request.args.get('limit', '50'))
+    except ValueError:
+        limit = 50
+    if limit < 1:
+        limit = 1
+    elif limit > 500:
+        limit = 500
+    
+    # Fetch environment data for the selected device with pagination and sorting
+    result = fetch_data(
+        'environment',
+        device_id=device_id,
+        next_token=next_token,
+        sort_by=sort_by,
+        sort_desc=sort_desc,
+        limit=limit,
+    )
+    print(f"Fetched environment data for device {device_id}, next_token: {next_token}, page: {current_page}, sort_by: {sort_by}, sort_desc: {sort_desc}")
+    
+    # Get field names directly from the data
+    fields = get_field_names(result['items'])
+    if 'formatted_time' not in fields and 'timestamp' in fields:
+        fields.append('formatted_time')  # Add formatted_time for display purposes
+    
+    # Update token history if moving forward and we have items
+    if next_token and next_token not in token_list and result['items']:
+        if current_page > len(token_list):
+            token_list.append(next_token)
+    
+    # Generate pagination URLs
+    next_page_token = result['next_token']
+    pagination = {
+        'has_next': next_page_token is not None,
+        'next_url': url_for(
+            'view_device_environment',
+            device_id=device_id,
+            next_token=next_page_token,
+            token_history=','.join(token_list),
+            page=current_page + 1,
+            sort_by=sort_by,
+            sort_desc=str(sort_desc).lower(),
+            limit=limit,
+        )
+        if next_page_token
+        else None,
+        'has_prev': current_page > 1,
+        'prev_url': url_for(
+            'view_device_environment',
+            device_id=device_id,
+            page=1,
+            sort_by=sort_by,
+            sort_desc=str(sort_desc).lower(),
+            limit=limit,
+        ) if current_page > 1 else None
+    }
+    
+    return render_template(
+        'device_classifications.html',  # Reuse the same template as classifications
+        device_id=device_id,
+        classifications=result['items'],  # Use same variable name for template compatibility
+        fields=fields,
+        pagination=pagination,
+        current_sort_by=sort_by,
+        current_sort_desc=sort_desc,
+        limit=limit,
+        table_name='environment'  # Pass table name for template customization
+    )
+
+@app.route('/download_filtered/<table_type>')
+def download_filtered_csv(table_type):
+    """Download table data as CSV with date range filtering using backend export API"""
+    try:
+        # Get filter parameters
+        device_id = request.args.get('device_id')
+        start_time = request.args.get('start_time')
+        end_time = request.args.get('end_time')
+        
+        # Validate required parameters
+        if not device_id:
+            return jsonify({'error': 'device_id is required'}), 400
+        if not start_time:
+            return jsonify({'error': 'start_time is required'}), 400
+        if not end_time:
+            return jsonify({'error': 'end_time is required'}), 400
+            
+        # Validate table type
+        valid_tables = ['classifications', 'environment', 'videos', 'detections']
+        if table_type not in valid_tables:
+            return jsonify({'error': f'Invalid table type. Must be one of: {valid_tables}'}), 400
+        
+        # Convert dates to ISO format if needed
+        try:
+            # Parse and reformat dates to ensure ISO 8601 format
+            start_dt = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
+            end_dt = datetime.fromisoformat(end_time.replace('Z', '+00:00'))
+            start_time_iso = start_dt.isoformat()
+            end_time_iso = end_dt.isoformat()
+        except ValueError as e:
+            return jsonify({'error': f'Invalid date format: {str(e)}'}), 400
+        
+        # Call the backend export API directly
+        import requests
+        base_url = os.getenv('API_BASE_URL')
+        api_key = os.getenv('SENSING_GARDEN_API_KEY')
+        
+        if not base_url or not api_key:
+            return jsonify({'error': 'API configuration not found'}), 500
+            
+        # Prepare export request parameters
+        params = {
+            'table': table_type,
+            'start_time': start_time_iso,
+            'end_time': end_time_iso,
+            'device_id': device_id,
+            'filename': f'{table_type}_{device_id}_{start_dt.strftime("%Y%m%d")}_{end_dt.strftime("%Y%m%d")}.csv'
+        }
+        
+        headers = {
+            'X-API-Key': api_key
+        }
+        
+        # Make request to backend export API
+        export_url = f'{base_url.rstrip("/")}/export'
+        response = requests.get(export_url, params=params, headers=headers, timeout=30)
+        
+        if response.status_code != 200:
+            error_msg = f'Export API returned status {response.status_code}'
+            try:
+                error_detail = response.json().get('error', 'Unknown error')
+                error_msg += f': {error_detail}'
+            except:
+                pass
+            return jsonify({'error': error_msg}), response.status_code
+        
+        # Return the CSV response from backend
+        csv_response = make_response(response.content)
+        csv_response.headers['Content-Type'] = 'text/csv'
+        csv_response.headers['Content-Disposition'] = response.headers.get('Content-Disposition', 
+                                                                           f'attachment; filename={params["filename"]}')
+        return csv_response
+        
+    except requests.RequestException as e:
+        return jsonify({'error': f'Failed to connect to export API: {str(e)}'}), 500
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/download/<table_type>')
 def download_csv(table_type):
     """Download table data as CSV"""
@@ -419,6 +604,14 @@ def download_csv(table_type):
             if not device_id:
                 return jsonify({'error': 'device_id is required for videos'}), 400
             response = client.videos.fetch(
+                device_id=device_id,
+                limit=1000  # Fetch more data for download
+            )
+        elif table_type == 'environment':
+            device_id = request.args.get('device_id')
+            if not device_id:
+                return jsonify({'error': 'device_id is required for environment'}), 400
+            response = client.environment.fetch(
                 device_id=device_id,
                 limit=1000  # Fetch more data for download
             )
