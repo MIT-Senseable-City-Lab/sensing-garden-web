@@ -131,10 +131,10 @@
         
         // Reset date range to defaults and hide error
         const now = new Date();
-        const yesterday = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1));
-        const lastWeek = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 8));
+        const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+        const lastWeek = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 7));
         document.getElementById('startDate').value = lastWeek.toISOString().split('T')[0];
-        document.getElementById('endDate').value = yesterday.toISOString().split('T')[0];
+        document.getElementById('endDate').value = today.toISOString().split('T')[0];
         document.getElementById('dateRangeError').style.display = 'none';
     }
     
@@ -158,20 +158,20 @@
         }
     }
     
-    // Set default date range to last 7 days, ending yesterday
+    // Set default date range to last 7 days, ending today
     document.addEventListener('DOMContentLoaded', function() {
         const now = new Date();
-        // Use UTC to avoid timezone issues - yesterday in UTC
-        const yesterday = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1));
-        const lastWeek = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 8));
+        // Use UTC to avoid timezone issues - today in UTC
+        const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+        const lastWeek = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 7));
         
-        // Set max date to yesterday to prevent future dates
-        const yesterdayStr = yesterday.toISOString().split('T')[0];
-        document.getElementById('startDate').setAttribute('max', yesterdayStr);
-        document.getElementById('endDate').setAttribute('max', yesterdayStr);
+        // Set max date to today to prevent future dates
+        const todayStr = today.toISOString().split('T')[0];
+        document.getElementById('startDate').setAttribute('max', todayStr);
+        document.getElementById('endDate').setAttribute('max', todayStr);
         
         document.getElementById('startDate').value = lastWeek.toISOString().split('T')[0];
-        document.getElementById('endDate').value = yesterdayStr;
+        document.getElementById('endDate').value = todayStr;
         
         // Add event listeners for real-time validation
         document.getElementById('startDate').addEventListener('change', validateDateRange);
