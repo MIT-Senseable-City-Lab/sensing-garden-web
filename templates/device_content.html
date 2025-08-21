@@ -94,16 +94,26 @@
         const startDateUTC = new Date(startDate + 'T00:00:00Z');
         const endDateUTC = new Date(endDate + 'T23:59:59Z');
         if (startDateUTC > endDateUTC) {
+            document.getElementById('dateRangeError').textContent = 'Error: Start date cannot be after end date.';
             document.getElementById('dateRangeError').style.display = 'block';
             return;
         }
         
-        // Hide error if validation passes
-        document.getElementById('dateRangeError').style.display = 'none';
-        
         // Combine date and time
         const startDateTime = `${startDate}T${startTime}:00Z`;
         const endDateTime = `${endDate}T${endTime}:59Z`;
+        
+        // Validate end time is not in the future (GMT)
+        const endDateTimeUTC = new Date(endDateTime);
+        const nowUTC = new Date();
+        if (endDateTimeUTC > nowUTC) {
+            document.getElementById('dateRangeError').textContent = 'Error: End time cannot be in the future (GMT).';
+            document.getElementById('dateRangeError').style.display = 'block';
+            return;
+        }
+        
+        // Hide error if all validation passes
+        document.getElementById('dateRangeError').style.display = 'none';
         
         // Build download URL
         const params = new URLSearchParams({
@@ -149,6 +159,7 @@
             const startDateUTC = new Date(startDate + 'T00:00:00Z');
             const endDateUTC = new Date(endDate + 'T23:59:59Z');
             if (startDateUTC > endDateUTC) {
+                errorDiv.textContent = 'Error: Start date cannot be after end date.';
                 errorDiv.style.display = 'block';
             } else {
                 errorDiv.style.display = 'none';
