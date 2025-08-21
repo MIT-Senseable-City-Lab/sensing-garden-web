@@ -536,6 +536,21 @@ def download_filtered_csv(table_type):
         except ValueError as e:
             return jsonify({'error': f'Invalid date format: {str(e)}'}), 400
         
+        # Validate date range - start date must be before end date
+        if start_dt >= end_dt:
+            return jsonify({'error': 'Start date must be before end date'}), 400
+        
+        # Validate reasonable date range (prevent extremely large ranges)
+        date_diff = (end_dt - start_dt).days
+        if date_diff > 365:
+            return jsonify({'error': 'Date range cannot exceed 365 days'}), 400
+        
+        # Validate dates are not in the future
+        from datetime import timezone
+        now = datetime.now(timezone.utc)
+        if end_dt > now:
+            return jsonify({'error': 'End date cannot be in the future'}), 400
+        
         # Call the backend export API directly
         import requests
         base_url = os.getenv('API_BASE_URL')

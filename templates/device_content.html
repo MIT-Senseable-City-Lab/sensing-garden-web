@@ -59,6 +59,9 @@
                         <div class="alert alert-info">
                             <small>Select the data table and date range to download. Times are optional and default to full day.</small>
                         </div>
+                        <div class="alert alert-danger" id="dateRangeError" style="display: none;">
+                            <small>Error: Start date cannot be after end date.</small>
+                        </div>
                     </form>
                 </div>
                 <div class="modal-footer">
@@ -87,6 +90,15 @@
         const startTime = formData.get('start_time') || '00:00';
         const endTime = formData.get('end_time') || '23:59';
         
+        // Validate date range
+        if (new Date(startDate) > new Date(endDate)) {
+            document.getElementById('dateRangeError').style.display = 'block';
+            return;
+        }
+        
+        // Hide error if validation passes
+        document.getElementById('dateRangeError').style.display = 'none';
+        
         // Combine date and time
         const startDateTime = `${startDate}T${startTime}:00Z`;
         const endDateTime = `${endDate}T${endTime}:59Z`;
@@ -114,6 +126,26 @@
         // Reset form
         form.reset();
         form.classList.remove('was-validated');
+        
+        // Reset date range to defaults and hide error
+        const today = new Date();
+        const lastWeek = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
+        document.getElementById('startDate').value = lastWeek.toISOString().split('T')[0];
+        document.getElementById('endDate').value = today.toISOString().split('T')[0];
+        document.getElementById('dateRangeError').style.display = 'none';
+    }
+    
+    // Validate date range in real-time
+    function validateDateRange() {
+        const startDate = document.getElementById('startDate').value;
+        const endDate = document.getElementById('endDate').value;
+        const errorDiv = document.getElementById('dateRangeError');
+        
+        if (startDate && endDate && new Date(startDate) > new Date(endDate)) {
+            errorDiv.style.display = 'block';
+        } else {
+            errorDiv.style.display = 'none';
+        }
     }
     
     // Set default date range to last 7 days
@@ -123,6 +155,10 @@
         
         document.getElementById('startDate').value = lastWeek.toISOString().split('T')[0];
         document.getElementById('endDate').value = today.toISOString().split('T')[0];
+        
+        // Add event listeners for real-time validation
+        document.getElementById('startDate').addEventListener('change', validateDateRange);
+        document.getElementById('endDate').addEventListener('change', validateDateRange);
     });
     </script>
 </div>
