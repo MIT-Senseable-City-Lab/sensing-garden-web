@@ -90,8 +90,10 @@
         const startTime = formData.get('start_time') || '00:00';
         const endTime = formData.get('end_time') || '23:59';
         
-        // Validate date range
-        if (new Date(startDate) > new Date(endDate)) {
+        // Validate date range using UTC to match server validation
+        const startDateUTC = new Date(startDate + 'T00:00:00Z');
+        const endDateUTC = new Date(endDate + 'T23:59:59Z');
+        if (startDateUTC > endDateUTC) {
             document.getElementById('dateRangeError').style.display = 'block';
             return;
         }
@@ -128,10 +130,11 @@
         form.classList.remove('was-validated');
         
         // Reset date range to defaults and hide error
-        const today = new Date();
-        const lastWeek = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
+        const now = new Date();
+        const yesterday = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1));
+        const lastWeek = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 8));
         document.getElementById('startDate').value = lastWeek.toISOString().split('T')[0];
-        document.getElementById('endDate').value = today.toISOString().split('T')[0];
+        document.getElementById('endDate').value = yesterday.toISOString().split('T')[0];
         document.getElementById('dateRangeError').style.display = 'none';
     }
     
@@ -141,20 +144,34 @@
         const endDate = document.getElementById('endDate').value;
         const errorDiv = document.getElementById('dateRangeError');
         
-        if (startDate && endDate && new Date(startDate) > new Date(endDate)) {
-            errorDiv.style.display = 'block';
+        if (startDate && endDate) {
+            // Use UTC to match server validation
+            const startDateUTC = new Date(startDate + 'T00:00:00Z');
+            const endDateUTC = new Date(endDate + 'T23:59:59Z');
+            if (startDateUTC > endDateUTC) {
+                errorDiv.style.display = 'block';
+            } else {
+                errorDiv.style.display = 'none';
+            }
         } else {
             errorDiv.style.display = 'none';
         }
     }
     
-    // Set default date range to last 7 days
+    // Set default date range to last 7 days, ending yesterday
     document.addEventListener('DOMContentLoaded', function() {
-        const today = new Date();
-        const lastWeek = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
+        const now = new Date();
+        // Use UTC to avoid timezone issues - yesterday in UTC
+        const yesterday = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1));
+        const lastWeek = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 8));
+        
+        // Set max date to yesterday to prevent future dates
+        const yesterdayStr = yesterday.toISOString().split('T')[0];
+        document.getElementById('startDate').setAttribute('max', yesterdayStr);
+        document.getElementById('endDate').setAttribute('max', yesterdayStr);
         
         document.getElementById('startDate').value = lastWeek.toISOString().split('T')[0];
-        document.getElementById('endDate').value = today.toISOString().split('T')[0];
+        document.getElementById('endDate').value = yesterdayStr;
         
         // Add event listeners for real-time validation
         document.getElementById('startDate').addEventListener('change', validateDateRange);

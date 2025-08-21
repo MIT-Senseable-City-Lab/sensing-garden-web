@@ -545,10 +545,12 @@ def download_filtered_csv(table_type):
         if date_diff > 365:
             return jsonify({'error': 'Date range cannot exceed 365 days'}), 400
         
-        # Validate dates are not in the future
-        from datetime import timezone
+        # Validate dates are not in the future (with small buffer for clock skew)
+        from datetime import timezone, timedelta
         now = datetime.now(timezone.utc)
-        if end_dt > now:
+        # Allow up to 1 hour in the future to account for timezone/clock differences
+        future_threshold = now + timedelta(hours=1)
+        if end_dt > future_threshold:
             return jsonify({'error': 'End date cannot be in the future'}), 400
         
         # Call the backend export API directly
