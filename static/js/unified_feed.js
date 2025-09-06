@@ -155,8 +155,24 @@ class DateUtils {
         try {
             // Handle different timestamp formats
             if (typeof timestamp === 'string') {
+                // Handle custom format: "2025-06-04T14-04-10-100268_0238"
+                // Convert to ISO format by replacing hyphens in time with colons
+                if (timestamp.includes('T') && /T\d{2}-\d{2}-\d{2}/.test(timestamp)) {
+                    // Extract the date and time parts
+                    const [datePart, timePart] = timestamp.split('T');
+                    if (timePart) {
+                        // Replace first two hyphens in time part with colons: "14-04-10-100268_0238" -> "14:04:10-100268_0238"
+                        const fixedTimePart = timePart.replace(/^(\d{2})-(\d{2})-(\d{2})/, '$1:$2:$3');
+                        // Remove the microseconds and suffix: "14:04:10-100268_0238" -> "14:04:10"
+                        const cleanTimePart = fixedTimePart.split('-')[0];
+                        const fixedTimestamp = `${datePart}T${cleanTimePart}`;
+                        date = new Date(fixedTimestamp);
+                    } else {
+                        date = new Date(timestamp);
+                    }
+                }
                 // Handle ISO strings with Z suffix
-                if (timestamp.endsWith('Z')) {
+                else if (timestamp.endsWith('Z')) {
                     date = new Date(timestamp);
                 } 
                 // Handle ISO strings without timezone
@@ -295,6 +311,37 @@ class DateUtils {
                 }
             });
         }
+    }
+    
+    /**
+     * Extract timestamp from an item object, checking multiple possible fields
+     * @param {Object} item - The item object to extract timestamp from
+     * @returns {string|number|Date|null} - The extracted timestamp or null
+     */
+    static extractTimestamp(item) {
+        if (!item || typeof item !== 'object') {
+            return null;
+        }
+        
+        // Check multiple possible timestamp fields in order of preference
+        const timestampFields = [
+            'timestamp',       // Main timestamp field
+            '_timestamp',      // Backend processed timestamp
+            'formatted_time',  // Formatted timestamp
+            'created_at',      // Creation timestamp
+            'recorded_at',     // Recording timestamp
+            'detected_at',     // Detection timestamp
+            'time',           // Generic time field
+            'date'            // Generic date field
+        ];
+        
+        for (const field of timestampFields) {
+            if (item[field] !== undefined && item[field] !== null) {
+                return item[field];
+            }
+        }
+        
+        return null;
     }
 }
 
@@ -534,12 +581,16 @@ class UnifiedFeed {
                 console.log(`[UnifiedFeed] ${contentType} loaded: ${data.items.length} items`);
                 
                 // Add any missing metadata to each item (backend already adds _contentType)
-                const itemsWithMetadata = data.items.map(item => ({
-                    ...item,
-                    _contentType: item._contentType || contentType, // Use backend value if available
-                    _timestamp: DateUtils.safeParseDate(item.timestamp),
-                    _id: this._generateItemId(item, item._contentType || contentType)
-                }));
+                const itemsWithMetadata = data.items.map(item => {
+                    const extractedTimestamp = DateUtils.extractTimestamp(item);
+                    return {
+                        ...item,
+                        _contentType: item._contentType || contentType, // Use backend value if available
+                        _timestamp: DateUtils.safeParseDate(extractedTimestamp),
+                        _rawTimestamp: extractedTimestamp, // Keep raw timestamp for debugging
+                        _id: this._generateItemId(item, item._contentType || contentType)
+                    };
+                });
                 
                 allItems.push(...itemsWithMetadata);
                 
@@ -974,11 +1025,17 @@ class UnifiedFeed {
      * Update the hasMoreContent flag based on pagination state
      */
     _updateHasMoreState() {
-        // Check if any content type has more data to load
-        this.hasMoreContent = Object.values(this.paginationState)
-            .some(state => state.hasMore);
+        // Check if any content type has more data to load, considering content type filter
+        const relevantStates = Object.entries(this.paginationState)
+            .filter(([contentType, state]) => this.shouldFetchContentType(contentType))
+            .map(([contentType, state]) => state);
+        
+        this.hasMoreContent = relevantStates.some(state => state.hasMore);
         
         console.log(`[UnifiedFeed] Has more content: ${this.hasMoreContent}`);
+        console.log(`[UnifiedFeed] Relevant pagination states:`, relevantStates.map((state, i) => 
+            `${Object.keys(this.paginationState)[i]}: hasMore=${state.hasMore}, nextToken=${!!state.nextToken}`
+        ).join(', '));
     }
     
     /**
@@ -1057,7 +1114,8 @@ class UnifiedFeed {
         div.setAttribute('data-timestamp', item.timestamp);
         
         const markerClass = `timeline-marker-${item._contentType}`;
-        const timestamp = DateUtils.safeFormatDate(item.timestamp);
+        const timestampToDisplay = DateUtils.extractTimestamp(item) || item.timestamp;
+        const timestamp = DateUtils.safeFormatDate(timestampToDisplay);
         const contentHtml = this._generateAdvancedContentHtml(item);
         
         // Add sophisticated animations and interactions
@@ -1268,8 +1326,8 @@ class UnifiedFeed {
                            : (item.bounding_box && Array.isArray(item.bounding_box) && item.bounding_box.length === 4) ? item.bounding_box 
                            : null;
             html += `
-                <div class="d-flex align-items-start">
-                    <div class="flex-shrink-0 me-3" style="position: relative; display: inline-block;">
+                <div class="d-flex align-items-start classification-layout">
+                    <div class="classification-image-container flex-shrink-0">
                         <img src="${item.image_url}" 
                              class="timeline-image rounded shadow-sm detection-img clickable-image"
                              onclick="openAdvancedImageModal('${item.image_url}', ${JSON.stringify(bboxData).replace(/"/g, '&quot;')}, '${item.timestamp}', ${JSON.stringify(item).replace(/"/g, '&quot;')})"
@@ -1281,7 +1339,7 @@ class UnifiedFeed {
                              data-timestamp="${item.timestamp}">
                         ${bboxData ? `<svg class="bbox-svg-overlay" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none;"><polygon points="" style="fill: none; stroke: #ff0000; stroke-width: 2;"></polygon></svg>` : ''}
                     </div>
-                    <div class="flex-grow-1">
+                    <div class="classification-text-container flex-grow-1">
                         <div class="classification-details">
                             <div class="species-name mb-1"><strong class="text-primary">${species}</strong></div>
                             <div class="classification-metrics">
@@ -1771,6 +1829,8 @@ class UnifiedFeed {
             // Load more data from endpoints that have more content
             const newItems = await this._loadMoreFromEndpoints();
             
+            console.log(`[UnifiedFeed] Loaded ${newItems.length} new items`);
+            
             if (newItems.length > 0) {
                 // Merge new items with existing
                 this.allLoadedItems.push(...newItems);
@@ -1778,14 +1838,19 @@ class UnifiedFeed {
                 
                 // Re-apply filters and render
                 await this._applyFiltersAndRender();
+            } else {
+                console.log('[UnifiedFeed] No new items loaded, updating state');
             }
             
-            // Update state
+            // Always update state after loading attempt
             this._updateHasMoreState();
             
         } catch (error) {
             console.error('[UnifiedFeed] Failed to load more:', error);
             this.showError('Failed to load more content: ' + error.message);
+            
+            // Ensure state is updated even on error
+            this._updateHasMoreState();
         } finally {
             this.isLoading = false;
             this._updateLoadMoreButton();
@@ -1803,8 +1868,16 @@ class UnifiedFeed {
                 this.shouldFetchContentType(contentType)
             );
             
+        console.log(`[UnifiedFeed] Checking endpoints for more data:`, endpointsWithMore.map(([type]) => type));
+            
         if (endpointsWithMore.length === 0) {
             console.log('[UnifiedFeed] No endpoints have more data');
+            // Make sure we mark all relevant content types as having no more data
+            Object.entries(this.paginationState).forEach(([contentType, state]) => {
+                if (this.shouldFetchContentType(contentType) && !state.nextToken) {
+                    state.hasMore = false;
+                }
+            });
             return [];
         }
         
@@ -1815,6 +1888,8 @@ class UnifiedFeed {
                 state.loading = true;
                 const data = await this._fetchContentTypeWithRetry(contentType);
                 
+                console.log(`[UnifiedFeed] Loaded ${data.items.length} items from ${contentType}, next_token: ${!!data.next_token}`);
+                
                 // Update pagination state
                 state.nextToken = data.next_token || null;
                 state.hasMore = !!data.next_token;
@@ -1822,16 +1897,22 @@ class UnifiedFeed {
                 state.loading = false;
                 
                 // Add metadata to items
-                return data.items.map(item => ({
-                    ...item,
-                    _contentType: contentType,
-                    _timestamp: DateUtils.safeParseDate(item.timestamp),
-                    _id: this._generateItemId(item, contentType)
-                }));
+                return data.items.map(item => {
+                    const extractedTimestamp = DateUtils.extractTimestamp(item);
+                    return {
+                        ...item,
+                        _contentType: contentType,
+                        _timestamp: DateUtils.safeParseDate(extractedTimestamp),
+                        _rawTimestamp: extractedTimestamp, // Keep raw timestamp for debugging
+                        _id: this._generateItemId(item, contentType)
+                    };
+                });
                 
             } catch (error) {
                 console.warn(`[UnifiedFeed] Failed to load more ${contentType}:`, error);
                 state.loading = false;
+                // If there's an error, assume no more data to prevent infinite retries
+                state.hasMore = false;
                 return [];
             }
         });
@@ -1839,9 +1920,13 @@ class UnifiedFeed {
         const results = await Promise.allSettled(fetchPromises);
         const allNewItems = [];
         
-        results.forEach(result => {
+        results.forEach((result, index) => {
+            const [contentType] = endpointsWithMore[index];
             if (result.status === 'fulfilled') {
                 allNewItems.push(...result.value);
+                console.log(`[UnifiedFeed] Successfully loaded ${result.value.length} items from ${contentType}`);
+            } else {
+                console.error(`[UnifiedFeed] Failed to load from ${contentType}:`, result.reason);
             }
         });
         
@@ -1857,6 +1942,9 @@ class UnifiedFeed {
         const hasMore = this.hasMoreContent;
         const isLoading = this.isLoading;
         
+        console.log(`[UnifiedFeed] Updating Load More button: hasMore=${hasMore}, isLoading=${isLoading}`);
+        
+        // Hide button if no more content, show if there is more content
         this.loadMoreContainer.style.display = hasMore ? 'block' : 'none';
         this.loadMoreBtn.disabled = isLoading;
         
@@ -1870,6 +1958,12 @@ class UnifiedFeed {
         if (loadMoreSpinner) {
             loadMoreSpinner.style.display = isLoading ? 'inline-block' : 'none';
         }
+        
+        // Log pagination state for debugging
+        const paginationSummary = Object.entries(this.paginationState).map(([type, state]) => 
+            `${type}: hasMore=${state.hasMore}, loading=${state.loading}, nextToken=${!!state.nextToken}`
+        ).join(', ');
+        console.log(`[UnifiedFeed] Pagination state: ${paginationSummary}`);
     }
     
     /**
