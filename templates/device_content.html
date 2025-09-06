@@ -6,6 +6,7 @@
 <div class="container-fluid">
     <h2>Device {{ device_id }} Data</h2>
     <p>Number of Classifications: {{ classifications_count }}</p>
+    <p>Number of Detections: {{ detections_count }}</p>
     <p>Number of Videos: {{ videos_count }}</p>
     <p>Number of Environmental Readings: {{ environment_count }}</p>
     <p>Models in Use: {{ models }}</p>
@@ -19,6 +20,11 @@
     <!-- Download Data Button -->
     <button type="button" class="btn btn-secondary" data-toggle="modal" data-target="#downloadModal">
         Download Data
+    </button>
+    
+    <!-- Delete Device Button -->
+    <button type="button" class="btn btn-danger" data-toggle="modal" data-target="#deleteDeviceModal">
+        <i class="fas fa-trash"></i> Delete All Device Data
     </button>
     <!-- CSV Download Modal -->
     <div class="modal fade" id="downloadModal" tabindex="-1" role="dialog" aria-labelledby="downloadModalLabel" aria-hidden="true">
@@ -69,6 +75,64 @@
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-dismiss="modal">Cancel</button>
                     <button type="button" class="btn btn-primary" onclick="downloadCSV()">Download CSV</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Delete Device Modal -->
+    <div class="modal fade" id="deleteDeviceModal" tabindex="-1" role="dialog" aria-labelledby="deleteDeviceModalLabel" aria-hidden="true">
+        <div class="modal-dialog" role="document">
+            <div class="modal-content">
+                <div class="modal-header bg-danger text-white">
+                    <h5 class="modal-title" id="deleteDeviceModalLabel">
+                        <i class="fas fa-exclamation-triangle"></i> Delete All Device Data
+                    </h5>
+                    <button type="button" class="close text-white" data-dismiss="modal" aria-label="Close">
+                        <span aria-hidden="true">&times;</span>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-danger">
+                        <h6><i class="fas fa-warning"></i> Permanent Deletion Warning</h6>
+                        <p><strong>This action cannot be undone!</strong></p>
+                        <p>Deleting device <strong>{{ device_id }}</strong> will permanently remove:</p>
+                        <ul>
+                            <li><strong>{{ classifications_count }}</strong> classification records</li>
+                            <li><strong>{{ videos_count }}</strong> video files</li>
+                            <li><strong>{{ environment_count }}</strong> environmental sensor readings</li>
+                            <li><strong>{{ detections_count }}</strong> detection records</li>
+                            <li>The device registration</li>
+                        </ul>
+                    </div>
+                    
+                    <form id="deleteDeviceForm">
+                        <div class="form-group">
+                            <label for="confirmDeviceId">
+                                <strong>Type the device ID exactly to confirm deletion:</strong>
+                            </label>
+                            <input type="text" class="form-control" id="confirmDeviceId" 
+                                   placeholder="Enter device ID: {{ device_id }}" 
+                                   autocomplete="off" required>
+                            <small class="form-text text-muted">
+                                Must match exactly: <code>{{ device_id }}</code>
+                            </small>
+                        </div>
+                        
+                        <div class="alert alert-info" style="display: none;" id="deleteProgress">
+                            <i class="fas fa-spinner fa-spin"></i> Deleting device and all associated data...
+                        </div>
+                        
+                        <div class="alert alert-danger" style="display: none;" id="deleteError">
+                            <strong>Error:</strong> <span id="deleteErrorMessage"></span>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-danger" id="confirmDeleteBtn" onclick="deleteDevice()" disabled>
+                        <i class="fas fa-trash"></i> Delete All Device Data Permanently
+                    </button>
                 </div>
             </div>
         </div>
@@ -189,6 +253,121 @@
         // Add event listeners for real-time validation
         document.getElementById('startDate').addEventListener('change', validateDateRange);
         document.getElementById('endDate').addEventListener('change', validateDateRange);
+    });
+    
+    // Delete Device Functionality
+    function deleteDevice() {
+        const deviceId = '{{ device_id }}';
+        const confirmInput = document.getElementById('confirmDeviceId');
+        const progressDiv = document.getElementById('deleteProgress');
+        const errorDiv = document.getElementById('deleteError');
+        const errorMessage = document.getElementById('deleteErrorMessage');
+        const confirmBtn = document.getElementById('confirmDeleteBtn');
+        
+        // Validate device ID input
+        if (confirmInput.value !== deviceId) {
+            showDeleteError('Device ID does not match. Please type it exactly as shown.');
+            return;
+        }
+        
+        // Show progress, hide errors, disable button
+        progressDiv.style.display = 'block';
+        errorDiv.style.display = 'none';
+        confirmBtn.disabled = true;
+        confirmBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Deleting...';
+        
+        // Make AJAX call to delete device
+        fetch(`/delete_device/${deviceId}`, {
+            method: 'DELETE',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            progressDiv.style.display = 'none';
+            
+            if (data.success) {
+                // Show success message and redirect after a brief delay
+                $('#deleteDeviceModal').modal('hide');
+                
+                // Show success notification
+                const successAlert = document.createElement('div');
+                successAlert.className = 'alert alert-success alert-dismissible fade show';
+                successAlert.innerHTML = `
+                    <strong>Success!</strong> ${data.message || 'Device deleted successfully.'}
+                    <button type="button" class="close" data-dismiss="alert">
+                        <span>&times;</span>
+                    </button>
+                `;
+                document.querySelector('.container-fluid').insertBefore(
+                    successAlert, document.querySelector('.container-fluid').firstChild
+                );
+                
+                // Redirect to home page after 2 seconds
+                setTimeout(() => {
+                    window.location.href = '/';
+                }, 2000);
+            } else {
+                showDeleteError(data.error || 'An unexpected error occurred.');
+                resetDeleteButton();
+            }
+        })
+        .catch(error => {
+            console.error('Error deleting device:', error);
+            progressDiv.style.display = 'none';
+            showDeleteError('Network error. Please check your connection and try again.');
+            resetDeleteButton();
+        });
+    }
+    
+    function showDeleteError(message) {
+        const errorDiv = document.getElementById('deleteError');
+        const errorMessage = document.getElementById('deleteErrorMessage');
+        errorMessage.textContent = message;
+        errorDiv.style.display = 'block';
+    }
+    
+    function resetDeleteButton() {
+        const confirmBtn = document.getElementById('confirmDeleteBtn');
+        confirmBtn.disabled = false;
+        confirmBtn.innerHTML = '<i class="fas fa-trash"></i> Delete All Device Data Permanently';
+    }
+    
+    // Enable/disable delete button based on device ID input
+    document.addEventListener('DOMContentLoaded', function() {
+        const confirmInput = document.getElementById('confirmDeviceId');
+        const confirmBtn = document.getElementById('confirmDeleteBtn');
+        const deviceId = '{{ device_id }}';
+        
+        confirmInput.addEventListener('input', function() {
+            const errorDiv = document.getElementById('deleteError');
+            errorDiv.style.display = 'none'; // Hide any previous errors
+            
+            if (this.value === deviceId) {
+                confirmBtn.disabled = false;
+                this.classList.add('is-valid');
+                this.classList.remove('is-invalid');
+            } else {
+                confirmBtn.disabled = true;
+                this.classList.remove('is-valid');
+                if (this.value.length > 0) {
+                    this.classList.add('is-invalid');
+                } else {
+                    this.classList.remove('is-invalid');
+                }
+            }
+        });
+        
+        // Reset modal when it's opened
+        $('#deleteDeviceModal').on('show.bs.modal', function() {
+            confirmInput.value = '';
+            confirmInput.classList.remove('is-valid', 'is-invalid');
+            confirmBtn.disabled = true;
+            document.getElementById('deleteProgress').style.display = 'none';
+            document.getElementById('deleteError').style.display = 'none';
+            resetDeleteButton();
+        });
     });
     </script>
 </div>

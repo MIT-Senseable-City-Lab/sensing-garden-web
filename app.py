@@ -157,6 +157,10 @@ def view_device(device_id):
         classifications_count = str(client.classifications.count(device_id=device_id))
         videos_count = str(client.videos.count(device_id=device_id))
         try:
+            detections_count = str(client.detections.count(device_id=device_id))
+        except AttributeError:
+            detections_count = "0"
+        try:
             environment_count = str(client.environment.count(device_id=device_id))
         except AttributeError:
             environment_count = "0"
@@ -180,6 +184,7 @@ def view_device(device_id):
             token_history=token_history,
             classifications_count=classifications_count,
             videos_count=videos_count,
+            detections_count=detections_count,
             environment_count=environment_count,
         )
     except Exception as e:
@@ -799,17 +804,44 @@ def view_device_videos(device_id):
 def view_device_feed(device_id):
     """Unified device feed page showing all content types chronologically"""
     try:
-        # Get counts for display
-        classifications_count = client.classifications.count(device_id=device_id)['count']
-        videos_count = client.videos.count(device_id=device_id)['count'] 
-        environment_count = client.environment.count(device_id=device_id)['count']
+        print(f"[DEBUG] Starting feed page for device: {device_id}")
         
+        # Get counts for display
+        print("[DEBUG] Getting classifications count...")
+        classifications_count = client.classifications.count(device_id=device_id)
+        print(f"[DEBUG] Classifications count: {classifications_count}")
+        
+        print("[DEBUG] Getting videos count...")
+        videos_count = client.videos.count(device_id=device_id)
+        print(f"[DEBUG] Videos count: {videos_count}")
+        
+        print("[DEBUG] Getting detections count...")
+        try:
+            detections_count = client.detections.count(device_id=device_id)
+            print(f"[DEBUG] Detections count: {detections_count}")
+        except AttributeError:
+            detections_count = 0
+            print("[DEBUG] Detections count not available, using 0")
+        
+        print("[DEBUG] Getting environment count...")
+        try:
+            environment_count = client.environment.count(device_id=device_id)
+            print(f"[DEBUG] Environment count: {environment_count}")
+        except AttributeError:
+            environment_count = 0
+            print("[DEBUG] Environment count not available, using 0")
+        
+        print("[DEBUG] Rendering template...")
         return render_template('device_feed.html',
                                device_id=device_id,
                                classifications_count=classifications_count,
                                videos_count=videos_count,
+                               detections_count=detections_count,
                                environment_count=environment_count)
     except Exception as e:
+        print(f"[ERROR] Feed page error: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return render_template('error.html', error=str(e))
 
 @app.route('/api/device/<device_id>/feed_data')
@@ -842,6 +874,37 @@ def get_device_feed_data(device_id):
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e), 'items': [], 'next_token': None}), 500
+
+@app.route('/delete_device/<device_id>', methods=['DELETE'])
+def delete_device(device_id):
+    """Delete a device and all its associated data"""
+    try:
+        print(f"[DEBUG] Starting device deletion for device: {device_id}")
+        
+        # Call the client's delete_device method
+        result = client.delete_device(device_id)
+        print(f"[DEBUG] Delete result: {result}")
+        
+        # Check if deletion was successful
+        if result.get('statusCode') == 200:
+            return jsonify({
+                'success': True,
+                'message': result.get('message', 'Device deleted successfully')
+            }), 200
+        else:
+            return jsonify({
+                'success': False,
+                'error': result.get('error', 'Failed to delete device')
+            }), 400
+            
+    except Exception as e:
+        print(f"[ERROR] Device deletion error: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
 
 if __name__ == '__main__':
     # Get port from environment variable or default to 8080
