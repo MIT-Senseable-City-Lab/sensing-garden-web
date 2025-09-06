@@ -1,0 +1,150 @@
+{% extends 'base.html' %}
+
+{% block title %}Device {{ device_id }} Feed - Sensing Garden{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-12">
+            <!-- Header -->
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <div>
+                    <h2>Device {{ device_id }} Unified Feed</h2>
+                    <div class="feed-stats">
+                        <span class="badge badge-secondary mr-2">Classifications: {{ classifications_count }}</span>
+                        <span class="badge badge-info mr-2">Videos: {{ videos_count }}</span>
+                        <span class="badge badge-warning">Environment: {{ environment_count }}</span>
+                    </div>
+                </div>
+                <div class="feed-header-actions">
+                    <button id="refreshFeed" class="btn btn-success btn-sm">
+                        <i class="fas fa-sync-alt"></i> Refresh
+                    </button>
+                    <a href="{{ url_for('view_device', device_id=device_id) }}" class="btn btn-secondary btn-sm">
+                        <i class="fas fa-arrow-left"></i> Back to Device
+                    </a>
+                </div>
+            </div>
+
+            <!-- Filter Controls -->
+            <div class="card mb-4">
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-3">
+                            <label for="contentTypeFilter" class="form-label">Content Type:</label>
+                            <select id="contentTypeFilter" class="form-control">
+                                <option value="all">All Content</option>
+                                <option value="classifications">Classifications</option>
+                                <option value="videos">Videos</option>
+                                <option value="environment">Environment</option>
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <label for="dateFilter" class="form-label">Date Range:</label>
+                            <select id="dateFilter" class="form-control">
+                                <option value="all">All Time</option>
+                                <option value="today">Today</option>
+                                <option value="week">Last 7 Days</option>
+                                <option value="month">Last 30 Days</option>
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <label for="sortOrder" class="form-label">Sort Order:</label>
+                            <select id="sortOrder" class="form-control">
+                                <option value="desc">Newest First</option>
+                                <option value="asc">Oldest First</option>
+                            </select>
+                        </div>
+                        <div class="col-md-3 d-flex align-items-end">
+                            <button id="applyFilters" class="btn btn-primary btn-block">Apply Filters</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Loading Indicator -->
+            <div id="loadingIndicator" class="text-center py-4" style="display: none;">
+                <div class="spinner-border text-primary" role="status">
+                    <span class="sr-only">Loading...</span>
+                </div>
+                <p class="mt-2 text-muted">Loading feed data...</p>
+            </div>
+
+            <!-- Error Message -->
+            <div id="errorMessage" class="alert alert-danger" style="display: none;">
+                <i class="fas fa-exclamation-triangle mr-2"></i>
+                <span id="errorText">An error occurred while loading the feed.</span>
+            </div>
+
+            <!-- Feed Timeline -->
+            <div id="feedTimeline" class="timeline-container" style="display: none;">
+                <!-- Timeline items will be inserted here -->
+            </div>
+
+            <!-- Empty state -->
+            <div id="emptyState" class="text-center py-5" style="display: none;">
+                <i class="fas fa-inbox fa-3x text-muted mb-3"></i>
+                <h4 class="text-muted">No content found</h4>
+                <p class="text-muted">Try adjusting your filters or check back later.</p>
+            </div>
+
+            <!-- Load More Button -->
+            <div id="loadMoreContainer" class="text-center mt-4" style="display: none;">
+                <button id="loadMoreBtn" class="btn btn-outline-primary">
+                    <span id="loadMoreText">Load More</span>
+                    <span id="loadMoreSpinner" class="spinner-border spinner-border-sm ml-2" style="display: none;"></span>
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Image modal (reuse existing modal from base.html) -->
+
+{% endblock %}
+
+{% block scripts %}
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/unified_feed.css') }}">
+<script src="{{ url_for('static', filename='js/bbox_overlays.js') }}"></script>
+<script src="{{ url_for('static', filename='js/unified_feed.js') }}"></script>
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // Prevent duplicate initialization
+        if (window.unifiedFeedInitialized) {
+            return;
+        }
+        window.unifiedFeedInitialized = true;
+        
+        // Initialize unified feed
+        const feed = new UnifiedFeed('{{ device_id }}', {
+            apiBaseUrl: window.location.origin,
+            apiKey: ''  // API calls will go through Flask routes
+        });
+        
+        // Initialize the feed to load data
+        feed.initialize();
+        
+        // Set up event listeners
+        document.getElementById('refreshFeed').addEventListener('click', function() {
+            feed.refresh();
+        });
+        
+        document.getElementById('applyFilters').addEventListener('click', function() {
+            const contentType = document.getElementById('contentTypeFilter').value;
+            const dateRange = document.getElementById('dateFilter').value;
+            const sortOrder = document.getElementById('sortOrder').value;
+            
+            feed.applyFilters({
+                contentType: contentType,
+                dateRange: dateRange,
+                sortOrder: sortOrder
+            });
+        });
+        
+        document.getElementById('loadMoreBtn').addEventListener('click', function() {
+            feed.loadMore();
+        });
+    });
+</script>
+{% endblock %}

@@ -795,6 +795,54 @@ def view_device_videos(device_id):
                            current_sort_desc=sort_desc,
                            download_url=download_url)
 
+@app.route('/view_device/<device_id>/feed')
+def view_device_feed(device_id):
+    """Unified device feed page showing all content types chronologically"""
+    try:
+        # Get counts for display
+        classifications_count = client.classifications.count(device_id=device_id)['count']
+        videos_count = client.videos.count(device_id=device_id)['count'] 
+        environment_count = client.environment.count(device_id=device_id)['count']
+        
+        return render_template('device_feed.html',
+                               device_id=device_id,
+                               classifications_count=classifications_count,
+                               videos_count=videos_count,
+                               environment_count=environment_count)
+    except Exception as e:
+        return render_template('error.html', error=str(e))
+
+@app.route('/api/device/<device_id>/feed_data')
+def get_device_feed_data(device_id):
+    """API endpoint for unified feed data fetching"""
+    content_type = request.args.get('content_type', 'classifications')
+    next_token = request.args.get('next_token')
+    limit = min(int(request.args.get('limit', 20)), 100)  # Max 100 items
+    sort_desc = request.args.get('sort_desc', 'true').lower() == 'true'
+    
+    try:
+        print(f"[DEBUG] Feed API called: device_id={device_id}, content_type={content_type}, limit={limit}")
+        result = fetch_data(
+            content_type,
+            device_id=device_id,
+            next_token=next_token,
+            sort_by='timestamp',
+            sort_desc=sort_desc,
+            limit=limit
+        )
+        
+        # Add content type to each item
+        for item in result['items']:
+            item['_contentType'] = content_type
+        
+        print(f"[DEBUG] Successfully fetched {len(result['items'])} items for {content_type}")
+        return jsonify(result)
+    except Exception as e:
+        print(f"[ERROR] Feed API error: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e), 'items': [], 'next_token': None}), 500
+
 if __name__ == '__main__':
     # Get port from environment variable or default to 8080
     port = int(os.environ.get('PORT', 8080))
