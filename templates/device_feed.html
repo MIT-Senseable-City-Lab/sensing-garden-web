@@ -110,41 +110,78 @@
 <script src="{{ url_for('static', filename='js/unified_feed.js') }}"></script>
 <script>
     document.addEventListener('DOMContentLoaded', function() {
+        console.log('[DEBUG] DOM loaded, initializing feed...');
+        
         // Prevent duplicate initialization
         if (window.unifiedFeedInitialized) {
+            console.log('[DEBUG] Feed already initialized, skipping');
             return;
         }
         window.unifiedFeedInitialized = true;
         
-        // Initialize unified feed
-        const feed = new UnifiedFeed('{{ device_id }}', {
-            apiBaseUrl: window.location.origin,
-            apiKey: ''  // API calls will go through Flask routes
-        });
+        // Test basic elements exist
+        const feedTimeline = document.getElementById('feedTimeline');
+        const loadingIndicator = document.getElementById('loadingIndicator');
+        console.log('[DEBUG] Elements found:', { feedTimeline: !!feedTimeline, loadingIndicator: !!loadingIndicator });
         
-        // Initialize the feed to load data
-        feed.initialize();
+        try {
+            // Initialize unified feed
+            console.log('[DEBUG] Creating UnifiedFeed instance...');
+            const feed = new UnifiedFeed('{{ device_id }}', {
+                apiBaseUrl: window.location.origin,
+                apiKey: '',  // API calls will go through Flask routes
+                cacheSize: 300,  // Increase cache size for better performance
+                cacheTtlMinutes: 10,  // Longer cache TTL for development
+                retryAttempts: 3,
+                retryDelayMs: 1000
+            });
+            
+            // Store globally for debugging and access
+            window.unifiedFeedInstance = feed;
+            
+            console.log('[DEBUG] Initializing feed...');
+            // Initialize the feed to load data
+            feed.initialize();
+        } catch (error) {
+            console.error('[DEBUG] Failed to initialize feed:', error);
+        }
         
         // Set up event listeners
-        document.getElementById('refreshFeed').addEventListener('click', function() {
-            feed.refresh();
-        });
-        
-        document.getElementById('applyFilters').addEventListener('click', function() {
-            const contentType = document.getElementById('contentTypeFilter').value;
-            const dateRange = document.getElementById('dateFilter').value;
-            const sortOrder = document.getElementById('sortOrder').value;
-            
-            feed.applyFilters({
-                contentType: contentType,
-                dateRange: dateRange,
-                sortOrder: sortOrder
+        try {
+            document.getElementById('refreshFeed').addEventListener('click', function() {
+                console.log('[DEBUG] Refresh button clicked');
+                if (window.unifiedFeedInstance) {
+                    window.unifiedFeedInstance.refresh();
+                }
             });
-        });
-        
-        document.getElementById('loadMoreBtn').addEventListener('click', function() {
-            feed.loadMore();
-        });
+            
+            document.getElementById('applyFilters').addEventListener('click', function() {
+                console.log('[DEBUG] Apply filters button clicked');
+                const contentType = document.getElementById('contentTypeFilter').value;
+                const dateRange = document.getElementById('dateFilter').value;
+                const sortOrder = document.getElementById('sortOrder').value;
+                
+                if (window.unifiedFeedInstance) {
+                    window.unifiedFeedInstance.applyFilters({
+                        contentType: contentType,
+                        dateRange: dateRange,
+                        sortOrder: sortOrder
+                    });
+                }
+            });
+            
+            const loadMoreBtn = document.getElementById('loadMoreBtn');
+            if (loadMoreBtn) {
+                loadMoreBtn.addEventListener('click', function() {
+                    console.log('[DEBUG] Load more button clicked');
+                    if (window.unifiedFeedInstance) {
+                        window.unifiedFeedInstance.loadMore();
+                    }
+                });
+            }
+        } catch (error) {
+            console.error('[DEBUG] Failed to set up event listeners:', error);
+        }
     });
 </script>
 {% endblock %}
