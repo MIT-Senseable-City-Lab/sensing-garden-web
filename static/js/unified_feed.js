@@ -394,7 +394,7 @@ class UnifiedFeed {
         
         // Global loading and state management
         this.isLoading = false;
-        this.hasMoreContent = true;
+        this.hasMoreContent = false;
         this.allLoadedItems = [];
         this.displayedItems = [];
         this.errorCount = 0;
@@ -522,6 +522,9 @@ class UnifiedFeed {
             
             // Update UI state
             this._updateHasMoreState();
+            
+            // Force button to normal state
+            this.isLoading = false;
             this._updateLoadMoreButton();
             this.lastRefresh = Date.now();
             
@@ -1039,7 +1042,7 @@ class UnifiedFeed {
     }
     
     /**
-     * Render timeline items with performance optimization for large lists
+     * Render timeline items with performance optimization for large lists and time markers
      */
     async _renderTimelineItemsWithPagination(items) {
         const startTime = Date.now();
@@ -1055,26 +1058,36 @@ class UnifiedFeed {
             return;
         }
         
+        // Generate time markers for the items
+        const timeMarkers = this._generateTimeMarkers(items);
+        console.log(`[UnifiedFeed] Generated ${timeMarkers.length} time markers`);
+        
+        // Merge items and time markers for rendering
+        const renderableItems = this._mergeItemsWithTimeMarkers(items, timeMarkers);
+        console.log(`[UnifiedFeed] Merged into ${renderableItems.length} renderable items`);
+        
         // Use requestAnimationFrame for smooth rendering of large lists
         const batchSize = 10;
         let currentIndex = 0;
         
         const renderBatch = () => {
-            const endIndex = Math.min(currentIndex + batchSize, items.length);
+            const endIndex = Math.min(currentIndex + batchSize, renderableItems.length);
             
             for (let i = currentIndex; i < endIndex; i++) {
-                const item = items[i];
-                const timelineItem = this.createTimelineItem(item);
-                this.feedTimeline.appendChild(timelineItem);
+                const item = renderableItems[i];
+                const element = item.isTimeMarker ? 
+                    this._createTimeMarkerElement(item) : 
+                    this.createTimelineItem(item);
+                this.feedTimeline.appendChild(element);
             }
             
             currentIndex = endIndex;
             
-            if (currentIndex < items.length) {
+            if (currentIndex < renderableItems.length) {
                 requestAnimationFrame(renderBatch);
             } else {
                 const renderTime = Date.now() - startTime;
-                console.log(`[UnifiedFeed] Rendered ${items.length} items in ${renderTime}ms`);
+                console.log(`[UnifiedFeed] Rendered ${renderableItems.length} items in ${renderTime}ms`);
                 this.showFeed();
                 // Render bounding box overlays after items are displayed
                 this._renderBboxOverlays();
@@ -1128,23 +1141,18 @@ class UnifiedFeed {
                 <div class="timeline-marker-pulse"></div>
             </div>
             <div class="timeline-content">
-                <div class="timeline-header">
-                    <div class="timeline-header-left">
-                        <h6 class="timeline-title">
+                <div class="timeline-header lean">
+                    <div class="timeline-header-content">
+                        <span class="timeline-title">
                             ${this.getContentTypeIcon(item._contentType)}
                             ${this.getContentTypeTitle(item._contentType)}
-                        </h6>
-                        <div class="timeline-metadata">
-                            ${this._generateMetadataHtml(item)}
-                        </div>
-                    </div>
-                    <div class="timeline-header-right">
-                        <span class="timeline-timestamp">
-                            <i class="fas fa-clock"></i> ${timestamp}
                         </span>
-                        <div class="timeline-actions">
-                            ${this._generateActionButtonsHtml(item)}
-                        </div>
+                        <span class="timeline-timestamp">
+                            ${timestamp}
+                        </span>
+                    </div>
+                    <div class="timeline-actions">
+                        ${this._generateActionButtonsHtml(item)}
                     </div>
                 </div>
                 <div class="timeline-body">
@@ -1311,12 +1319,22 @@ class UnifiedFeed {
      * Generate advanced classification content with sophisticated styling
      */
     _generateAdvancedClassificationContent(item) {
-        const confidence = item.confidence ? Math.round(item.confidence * 100) : 0;
+        // Extract all taxonomy and confidence data
         const species = item.species || 'Unknown Species';
+        const family = item.family || null;
+        const genus = item.genus || null;
         
-        // Get confidence styling
-        const confidenceClass = confidence > 80 ? 'text-success' : confidence > 60 ? 'text-warning' : 'text-danger';
-        const confidenceIcon = confidence > 80 ? 'fas fa-check-circle' : confidence > 60 ? 'fas fa-exclamation-triangle' : 'fas fa-times-circle';
+        // Extract all confidence values
+        const speciesConfidence = item.species_confidence ? Math.round(item.species_confidence * 100) : null;
+        const familyConfidence = item.family_confidence ? Math.round(item.family_confidence * 100) : null;
+        const genusConfidence = item.genus_confidence ? Math.round(item.genus_confidence * 100) : null;
+        
+        // Use species confidence as primary, fallback to general confidence
+        const primaryConfidence = speciesConfidence || (item.confidence ? Math.round(item.confidence * 100) : 0);
+        
+        // Get confidence styling based on primary confidence
+        const confidenceClass = primaryConfidence > 80 ? 'text-success' : primaryConfidence > 60 ? 'text-warning' : 'text-danger';
+        const confidenceIcon = primaryConfidence > 80 ? 'fas fa-check-circle' : primaryConfidence > 60 ? 'fas fa-exclamation-triangle' : 'fas fa-times-circle';
         
         let html = `<div class="classification-content compact">`;
         
@@ -1341,14 +1359,7 @@ class UnifiedFeed {
                     </div>
                     <div class="classification-text-container flex-grow-1">
                         <div class="classification-details">
-                            <div class="species-name mb-1"><strong class="text-primary">${species}</strong></div>
-                            <div class="classification-metrics">
-                                <div class="d-flex align-items-center mb-1">
-                                    <i class="${confidenceIcon} ${confidenceClass} me-1" style="font-size: 0.8em;"></i>
-                                    <span class="confidence-value ${confidenceClass}"><strong>${confidence}%</strong> confidence</span>
-                                </div>
-                                ${this._generateAdditionalClassificationFields(item)}
-                            </div>
+                            ${this._generateTaxonomyAndConfidenceDisplay(species, family, genus, speciesConfidence, familyConfidence, genusConfidence, item)}
                         </div>
                     </div>
                 </div>
@@ -1356,19 +1367,49 @@ class UnifiedFeed {
         } else {
             html += `
                 <div class="classification-details">
-                    <div class="species-name mb-1"><strong class="text-primary">${species}</strong></div>
-                    <div class="classification-metrics">
-                        <div class="d-flex align-items-center mb-1">
-                            <i class="${confidenceIcon} ${confidenceClass} me-1" style="font-size: 0.8em;"></i>
-                            <span class="confidence-value ${confidenceClass}"><strong>${confidence}%</strong> confidence</span>
-                        </div>
-                        ${this._generateAdditionalClassificationFields(item)}
-                    </div>
+                    ${this._generateTaxonomyAndConfidenceDisplay(species, family, genus, speciesConfidence, familyConfidence, genusConfidence, item)}
                 </div>
             `;
         }
         
         html += `</div>`;
+        return html;
+    }
+    
+    /**
+     * Generate taxonomy and confidence display with all available data
+     */
+    _generateTaxonomyAndConfidenceDisplay(species, family, genus, speciesConfidence, familyConfidence, genusConfidence, item) {
+        let html = `<div class="taxonomy-display mb-2">`;
+        
+        // Primary species line
+        html += `<div class="species-name mb-1"><strong class="text-primary">${species}</strong>`;
+        if (speciesConfidence) {
+            const confidenceClass = speciesConfidence > 80 ? 'text-success' : speciesConfidence > 60 ? 'text-warning' : 'text-danger';
+            html += ` <span class="confidence-badge ${confidenceClass}">${speciesConfidence}%</span>`;
+        }
+        html += `</div>`;
+        
+        // Taxonomy hierarchy
+        const taxonomyItems = [];
+        
+        if (family && familyConfidence) {
+            taxonomyItems.push(`<span class="taxonomy-item">Family: <strong>${family}</strong> <span class="confidence-small text-muted">${familyConfidence}%</span></span>`);
+        }
+        
+        if (genus && genusConfidence) {
+            taxonomyItems.push(`<span class="taxonomy-item">Genus: <strong>${genus}</strong> <span class="confidence-small text-muted">${genusConfidence}%</span></span>`);
+        }
+        
+        if (taxonomyItems.length > 0) {
+            html += `<div class="taxonomy-hierarchy text-sm text-muted mb-1">${taxonomyItems.join(' • ')}</div>`;
+        }
+        
+        html += `</div>`;
+        
+        // Add additional fields
+        html += `<div class="classification-metrics">${this._generateAdditionalClassificationFields(item)}</div>`;
+        
         return html;
     }
     
@@ -1450,8 +1491,7 @@ class UnifiedFeed {
                 <div class="video-content compact">
                     <video controls 
                            preload="metadata" 
-                           class="video-player w-100 rounded"
-                           poster="${item.thumbnail_url || ''}">
+                           class="video-player w-100 rounded">
                         <source src="${item.video_url}" type="video/mp4">
                         Your browser does not support the video tag.
                     </video>
@@ -1720,7 +1760,7 @@ class UnifiedFeed {
     getContentTypeTitle(type) {
         const titles = {
             classifications: 'Insect Classification',
-            videos: 'Time-lapse Video',
+            videos: 'Video',
             environment: 'Environmental Reading'
         };
         return titles[type] || 'Unknown Content';
@@ -1816,8 +1856,8 @@ class UnifiedFeed {
      * Load more content using advanced pagination
      */
     async loadMore() {
-        if (this.isLoading || !this.hasMoreContent) {
-            console.log('[UnifiedFeed] Cannot load more - already loading or no more content');
+        if (this.isLoading) {
+            console.log('[UnifiedFeed] Cannot load more - already loading');
             return;
         }
         
@@ -1836,14 +1876,16 @@ class UnifiedFeed {
                 this.allLoadedItems.push(...newItems);
                 this.allLoadedItems = this._mergeAndSortItems(this.allLoadedItems);
                 
-                // Re-apply filters and render
-                await this._applyFiltersAndRender();
+                // Apply filters to new items only and append to timeline
+                await this._appendNewItemsToTimeline(newItems);
             } else {
-                console.log('[UnifiedFeed] No new items loaded, updating state');
+                console.log('[UnifiedFeed] No new items loaded - showing "nothing more to load" message');
+                this._showNoMoreContentDialog();
             }
             
             // Always update state after loading attempt
             this._updateHasMoreState();
+            this._updateLoadMoreButton();
             
         } catch (error) {
             console.error('[UnifiedFeed] Failed to load more:', error);
@@ -1855,6 +1897,67 @@ class UnifiedFeed {
             this.isLoading = false;
             this._updateLoadMoreButton();
         }
+    }
+    
+    /**
+     * Append new items to timeline without re-rendering existing items
+     */
+    async _appendNewItemsToTimeline(newItems) {
+        const startTime = Date.now();
+        console.log(`[UnifiedFeed] Appending ${newItems.length} new items to timeline`);
+        
+        // Apply filters to new items only
+        const filteredNewItems = this._applyFiltersToItems(newItems);
+        console.log(`[UnifiedFeed] After filtering: ${filteredNewItems.length} items to append`);
+        
+        if (filteredNewItems.length === 0) {
+            console.log('[UnifiedFeed] No new items to append after filtering');
+            return;
+        }
+        
+        // Update displayed items array
+        this.displayedItems.push(...filteredNewItems);
+        
+        // Generate time markers for new items
+        const timeMarkers = this._generateTimeMarkers(filteredNewItems);
+        console.log(`[UnifiedFeed] Generated ${timeMarkers.length} time markers for new items`);
+        
+        // Merge new items with time markers
+        const sortedNewItems = this._mergeItemsWithTimeMarkers(filteredNewItems, timeMarkers);
+        
+        // For "Load More" functionality, we should append items at the end
+        // since pagination typically loads older content (or newer depending on sort order)
+        // The API should return items in the correct order for appending
+        
+        // Use requestAnimationFrame for smooth rendering
+        const batchSize = 5;
+        let currentIndex = 0;
+        
+        const renderBatch = () => {
+            const endIndex = Math.min(currentIndex + batchSize, sortedNewItems.length);
+            
+            for (let i = currentIndex; i < endIndex; i++) {
+                const item = sortedNewItems[i];
+                const element = item.isTimeMarker ? 
+                    this._createTimeMarkerElement(item) : 
+                    this.createTimelineItem(item);
+                this.feedTimeline.appendChild(element);
+            }
+            
+            currentIndex = endIndex;
+            
+            if (currentIndex < sortedNewItems.length) {
+                requestAnimationFrame(renderBatch);
+            } else {
+                const renderTime = Date.now() - startTime;
+                console.log(`[UnifiedFeed] Appended ${sortedNewItems.length} items in ${renderTime}ms`);
+                // Render bounding box overlays for new items
+                this._renderBboxOverlays();
+            }
+        };
+        
+        // Start the rendering process
+        requestAnimationFrame(renderBatch);
     }
     
     /**
@@ -1939,31 +2042,49 @@ class UnifiedFeed {
     _updateLoadMoreButton() {
         if (!this.loadMoreBtn || !this.loadMoreContainer) return;
         
-        const hasMore = this.hasMoreContent;
-        const isLoading = this.isLoading;
+        console.log(`[UnifiedFeed] Updating Load More button: isLoading=${this.isLoading}`);
         
-        console.log(`[UnifiedFeed] Updating Load More button: hasMore=${hasMore}, isLoading=${isLoading}`);
-        
-        // Hide button if no more content, show if there is more content
-        this.loadMoreContainer.style.display = hasMore ? 'block' : 'none';
-        this.loadMoreBtn.disabled = isLoading;
+        // Always show the button
+        this.loadMoreContainer.style.display = 'block';
+        this.loadMoreBtn.disabled = this.isLoading;
         
         const loadMoreText = document.getElementById('loadMoreText');
         const loadMoreSpinner = document.getElementById('loadMoreSpinner');
         
         if (loadMoreText) {
-            loadMoreText.textContent = isLoading ? 'Loading...' : 'Load More';
+            loadMoreText.textContent = this.isLoading ? 'Loading...' : 'Load More';
+            loadMoreText.style.display = 'inline-block';
         }
         
         if (loadMoreSpinner) {
-            loadMoreSpinner.style.display = isLoading ? 'inline-block' : 'none';
+            loadMoreSpinner.style.display = this.isLoading ? 'inline-block' : 'none';
         }
+    }
+    
+    /**
+     * Show temporary dialog when no more content is available
+     */
+    _showNoMoreContentDialog() {
+        // Create a temporary toast/alert
+        const alert = document.createElement('div');
+        alert.className = 'alert alert-info alert-dismissible fade show position-fixed';
+        alert.style.cssText = 'top: 20px; right: 20px; z-index: 1050; max-width: 300px;';
+        alert.innerHTML = `
+            <i class="fas fa-info-circle me-2"></i>
+            No more content to load
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        `;
         
-        // Log pagination state for debugging
-        const paginationSummary = Object.entries(this.paginationState).map(([type, state]) => 
-            `${type}: hasMore=${state.hasMore}, loading=${state.loading}, nextToken=${!!state.nextToken}`
-        ).join(', ');
-        console.log(`[UnifiedFeed] Pagination state: ${paginationSummary}`);
+        document.body.appendChild(alert);
+        
+        // Auto-remove after 3 seconds
+        setTimeout(() => {
+            if (alert && alert.parentNode) {
+                alert.remove();
+            }
+        }, 3000);
+        
+        console.log('[UnifiedFeed] Showed "no more content" dialog');
     }
     
     /**
@@ -2111,6 +2232,138 @@ class UnifiedFeed {
     }
 
     /**
+     * Generate time markers for timeline items
+     * Creates major markers (days) and minor markers (hours) with granular hour detection
+     * Shows hour markers between any consecutive items that have different hours
+     */
+    _generateTimeMarkers(items) {
+        if (items.length === 0) return [];
+        
+        const markers = [];
+        const seenDays = new Set();
+        
+        // Sort items by timestamp to ensure proper chronological order
+        const sortedItems = [...items].sort((a, b) => {
+            const aTime = a._timestamp ? a._timestamp.getTime() : 0;
+            const bTime = b._timestamp ? b._timestamp.getTime() : 0;
+            return this.currentFilters.sortOrder === 'desc' ? bTime - aTime : aTime - bTime;
+        });
+        
+        sortedItems.forEach((item, index) => {
+            if (!item._timestamp) return;
+            
+            const itemDate = item._timestamp;
+            const dayKey = itemDate.toDateString();
+            
+            // Check if we need a day marker
+            if (!seenDays.has(dayKey)) {
+                seenDays.add(dayKey);
+                markers.push({
+                    isTimeMarker: true,
+                    type: 'day',
+                    timestamp: itemDate,
+                    label: itemDate.toLocaleDateString('en-US', {
+                        weekday: 'short',
+                        year: 'numeric',
+                        month: 'short',
+                        day: 'numeric'
+                    }),
+                    sortKey: itemDate.getTime(),
+                    itemIndex: index
+                });
+            }
+            
+            // Check for hour marker between consecutive items
+            if (index > 0) {
+                const prevItem = sortedItems[index - 1];
+                if (prevItem._timestamp) {
+                    const prevDate = prevItem._timestamp;
+                    const prevDayKey = prevDate.toDateString();
+                    const currentHour = itemDate.getHours();
+                    const prevHour = prevDate.getHours();
+                    
+                    // Add hour marker if hours are different (crossing hour boundary)
+                    if (currentHour !== prevHour) {
+                        // Don't add hour marker if we're on a different day (day markers already provide time context)
+                        const isDifferentDay = dayKey !== prevDayKey;
+                        
+                        if (!isDifferentDay) {
+                            // Create hour marker for the current item's hour
+                            const hourMarkerTime = new Date(itemDate);
+                            hourMarkerTime.setMinutes(0, 0, 0); // Round to the top of the hour
+                            
+                            markers.push({
+                                isTimeMarker: true,
+                                type: 'hour',
+                                timestamp: hourMarkerTime,
+                                label: hourMarkerTime.toLocaleTimeString('en-US', {
+                                    hour: 'numeric',
+                                    minute: '2-digit',
+                                    hour12: true
+                                }),
+                                sortKey: itemDate.getTime() - 1, // Ensure hour marker appears just before the item
+                                itemIndex: index
+                            });
+                        }
+                    }
+                }
+            }
+        });
+        
+        return markers;
+    }
+    
+    /**
+     * Merge timeline items with time markers in chronological order
+     */
+    _mergeItemsWithTimeMarkers(items, markers) {
+        const allItems = [...items, ...markers];
+        
+        // Sort all items by timestamp
+        return allItems.sort((a, b) => {
+            const aTime = a._timestamp ? a._timestamp.getTime() : a.sortKey || 0;
+            const bTime = b._timestamp ? b._timestamp.getTime() : b.sortKey || 0;
+            
+            // If timestamps are equal, time markers should come before timeline items
+            if (aTime === bTime) {
+                if (a.isTimeMarker && !b.isTimeMarker) return -1;
+                if (!a.isTimeMarker && b.isTimeMarker) return 1;
+                // If both are time markers, day markers come before hour markers
+                if (a.isTimeMarker && b.isTimeMarker) {
+                    if (a.type === 'day' && b.type === 'hour') return -1;
+                    if (a.type === 'hour' && b.type === 'day') return 1;
+                }
+            }
+            
+            return this.currentFilters.sortOrder === 'desc' ? bTime - aTime : aTime - bTime;
+        });
+    }
+    
+    /**
+     * Create a time marker HTML element
+     */
+    _createTimeMarkerElement(marker) {
+        const div = document.createElement('div');
+        div.className = `time-marker time-marker-${marker.type}`;
+        div.setAttribute('data-timestamp', marker.timestamp.toISOString());
+        div.setAttribute('data-type', marker.type);
+        
+        const markerClass = marker.type === 'day' ? 'time-marker-major' : 'time-marker-minor';
+        const iconClass = marker.type === 'day' ? 'fas fa-calendar-day' : 'fas fa-clock';
+        
+        div.innerHTML = `
+            <div class="time-marker-line ${markerClass}">
+                <div class="time-marker-label">
+                    <i class="${iconClass}"></i>
+                    <span>${marker.label}</span>
+                </div>
+            </div>
+        `;
+        
+        return div;
+    }
+    
+    /**
      * Performance monitoring and debugging
      */
     getPerformanceStats() {
@@ -2130,6 +2383,7 @@ class UnifiedFeed {
             }
         };
     }
+
 }
 
 // Enhanced helper functions for image modal integration
