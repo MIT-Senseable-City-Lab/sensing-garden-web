@@ -351,7 +351,9 @@ class UnifiedFeed {
         this.options = {
             apiBaseUrl: options.apiBaseUrl || '/api',
             apiKey: options.apiKey || '',
-            pageSize: options.pageSize || 20,
+            pageSize: options.pageSize || 20,  // Local display page size
+            initialBatchSize: options.initialBatchSize || 100,  // Large initial fetch per content type
+            loadMoreBatchSize: options.loadMoreBatchSize || 50,  // Batch size for Load More
             cacheSize: options.cacheSize || 200,
             cacheTtlMinutes: options.cacheTtlMinutes || 5,
             retryAttempts: options.retryAttempts || 3,
@@ -395,8 +397,9 @@ class UnifiedFeed {
         // Global loading and state management
         this.isLoading = false;
         this.hasMoreContent = false;
-        this.allLoadedItems = [];
-        this.displayedItems = [];
+        this.allLoadedItems = [];  // All items loaded from API
+        this.displayedItems = [];  // Currently displayed items (local pagination)
+        this.localPageIndex = 0;   // Current page in local pagination
         this.errorCount = 0;
         this.lastRefresh = null;
         
@@ -680,9 +683,13 @@ class UnifiedFeed {
         const pagination = this.paginationState[contentType];
         const url = `${this.options.apiBaseUrl}/api/device/${this.deviceId}/feed_data`;
         
+        // Use larger batch sizes for initial load, smaller for load more
+        const batchSize = pagination.nextToken ? 
+            this.options.loadMoreBatchSize : this.options.initialBatchSize;
+        
         const params = new URLSearchParams({
             content_type: contentType,
-            limit: this.options.pageSize,
+            limit: Math.min(batchSize, 100),  // API max is 100
             sort_desc: this.currentFilters.sortOrder === 'desc' ? 'true' : 'false'
         });
         
@@ -930,18 +937,29 @@ class UnifiedFeed {
     }
     
     /**
-     * Apply current filters to loaded items and render the result
+     * Apply current filters to loaded items and render the result with local pagination
      */
     async _applyFiltersAndRender() {
         const startTime = Date.now();
-        console.log('[UnifiedFeed] Applying filters and rendering...');
+        console.log('[UnifiedFeed] Applying filters and rendering with local pagination...');
         
-        // Apply filters to get display items
-        this.displayedItems = this._applyFiltersToItems(this.allLoadedItems);
-        console.log(`[UnifiedFeed] Filtered to ${this.displayedItems.length} items`, this.displayedItems);
+        // Apply filters to get all matching items (not paginated yet)
+        const allFilteredItems = this._applyFiltersToItems(this.allLoadedItems);
+        console.log(`[UnifiedFeed] Filtered to ${allFilteredItems.length} total items`);
         
-        // Render the filtered items
-        await this._renderTimelineItemsWithPagination(this.displayedItems);
+        // Reset local pagination and show first page
+        this.localPageIndex = 0;
+        this.displayedItems = allFilteredItems;
+        
+        // Show first page of items
+        const itemsToShow = this._getItemsForLocalPage(allFilteredItems, 0);
+        console.log(`[UnifiedFeed] Showing first ${itemsToShow.length} items from page 0`);
+        
+        // Render the first page items
+        await this._renderTimelineItemsWithPagination(itemsToShow);
+        
+        // Update Load More button based on remaining items
+        this._updateLoadMoreButtonForLocalPagination(allFilteredItems);
         
         const renderTime = Date.now() - startTime;
         this.performanceMetrics.renderTimes.push(renderTime);
@@ -1853,7 +1871,7 @@ class UnifiedFeed {
     }
     
     /**
-     * Load more content using advanced pagination
+     * Load more content using unified chronological pagination
      */
     async loadMore() {
         if (this.isLoading) {
@@ -1866,26 +1884,51 @@ class UnifiedFeed {
         this._updateLoadMoreButton();
         
         try {
-            // Load more data from endpoints that have more content
-            const newItems = await this._loadMoreFromEndpoints();
+            // Check if we have more items locally to display first
+            const allFilteredItems = this._applyFiltersToItems(this.allLoadedItems);
+            const nextLocalPageIndex = this.localPageIndex + 1;
+            const nextPageItems = this._getItemsForLocalPage(allFilteredItems, nextLocalPageIndex);
             
-            console.log(`[UnifiedFeed] Loaded ${newItems.length} new items`);
-            
-            if (newItems.length > 0) {
-                // Merge new items with existing
-                this.allLoadedItems.push(...newItems);
-                this.allLoadedItems = this._mergeAndSortItems(this.allLoadedItems);
+            // If we have enough items locally, show them without API call
+            if (nextPageItems.length >= this.options.pageSize) {
+                console.log(`[UnifiedFeed] Showing next ${nextPageItems.length} items from local page ${nextLocalPageIndex}`);
                 
-                // Apply filters to new items only and append to timeline
-                await this._appendNewItemsToTimeline(newItems);
+                this.localPageIndex = nextLocalPageIndex;
+                await this._appendItemsToTimeline(nextPageItems);
+                this._updateLoadMoreButtonForLocalPagination(allFilteredItems);
+                
             } else {
-                console.log('[UnifiedFeed] No new items loaded - showing "nothing more to load" message');
-                this._showNoMoreContentDialog();
+                // We need more data from the API
+                console.log('[UnifiedFeed] Loading more data from API for better chronological coverage...');
+                
+                const newItems = await this._loadMoreFromEndpoints();
+                console.log(`[UnifiedFeed] Loaded ${newItems.length} new items from API`);
+                
+                if (newItems.length > 0) {
+                    // Merge new items with existing and re-sort for chronological order
+                    this.allLoadedItems.push(...newItems);
+                    this.allLoadedItems = this._mergeAndSortItems(this.allLoadedItems);
+                    
+                    // Re-calculate filtered items with new data
+                    const newFilteredItems = this._applyFiltersToItems(this.allLoadedItems);
+                    const itemsToShow = this._getItemsForLocalPage(newFilteredItems, nextLocalPageIndex);
+                    
+                    if (itemsToShow.length > 0) {
+                        this.localPageIndex = nextLocalPageIndex;
+                        await this._appendItemsToTimeline(itemsToShow);
+                        this._updateLoadMoreButtonForLocalPagination(newFilteredItems);
+                    } else {
+                        console.log('[UnifiedFeed] No new items to show after API fetch');
+                        this._showNoMoreContentDialog();
+                    }
+                } else {
+                    console.log('[UnifiedFeed] No more data available from API');
+                    this._showNoMoreContentDialog();
+                }
             }
             
             // Always update state after loading attempt
             this._updateHasMoreState();
-            this._updateLoadMoreButton();
             
         } catch (error) {
             console.error('[UnifiedFeed] Failed to load more:', error);
@@ -1900,7 +1943,91 @@ class UnifiedFeed {
     }
     
     /**
-     * Append new items to timeline without re-rendering existing items
+     * Get items for a specific local page from filtered items
+     */
+    _getItemsForLocalPage(allFilteredItems, pageIndex) {
+        const startIndex = pageIndex * this.options.pageSize;
+        const endIndex = startIndex + this.options.pageSize;
+        const pageItems = allFilteredItems.slice(startIndex, endIndex);
+        
+        console.log(`[UnifiedFeed] Local page ${pageIndex}: showing items ${startIndex}-${endIndex-1} of ${allFilteredItems.length} total`);
+        return pageItems;
+    }
+    
+    /**
+     * Update Load More button for local pagination
+     */
+    _updateLoadMoreButtonForLocalPagination(allFilteredItems) {
+        const totalPages = Math.ceil(allFilteredItems.length / this.options.pageSize);
+        const hasMoreLocal = this.localPageIndex + 1 < totalPages;
+        const hasMoreFromAPI = this.hasMoreContent;
+        
+        // Show Load More if we have more local pages OR more data from API
+        const shouldShowLoadMore = hasMoreLocal || hasMoreFromAPI;
+        
+        console.log(`[UnifiedFeed] Local pagination: page ${this.localPageIndex + 1}/${totalPages}, hasMoreLocal: ${hasMoreLocal}, hasMoreAPI: ${hasMoreFromAPI}`);
+        
+        if (this.loadMoreContainer) {
+            this.loadMoreContainer.style.display = shouldShowLoadMore ? 'block' : 'none';
+        }
+        
+        if (this.loadMoreBtn) {
+            this.loadMoreBtn.disabled = this.isLoading || !shouldShowLoadMore;
+        }
+    }
+    
+    /**
+     * Append items to timeline (used for Load More functionality)
+     */
+    async _appendItemsToTimeline(items) {
+        const startTime = Date.now();
+        console.log(`[UnifiedFeed] Appending ${items.length} items to timeline`);
+        
+        if (items.length === 0) {
+            console.log('[UnifiedFeed] No items to append');
+            return;
+        }
+        
+        // Generate time markers for new items
+        const timeMarkers = this._generateTimeMarkers(items);
+        console.log(`[UnifiedFeed] Generated ${timeMarkers.length} time markers for new items`);
+        
+        // Merge new items with time markers
+        const sortedNewItems = this._mergeItemsWithTimeMarkers(items, timeMarkers);
+        
+        // Use requestAnimationFrame for smooth rendering
+        const batchSize = 5;
+        let currentIndex = 0;
+        
+        const renderBatch = () => {
+            const endIndex = Math.min(currentIndex + batchSize, sortedNewItems.length);
+            
+            for (let i = currentIndex; i < endIndex; i++) {
+                const item = sortedNewItems[i];
+                const element = item.isTimeMarker ? 
+                    this._createTimeMarkerElement(item) : 
+                    this.createTimelineItem(item);
+                this.feedTimeline.appendChild(element);
+            }
+            
+            currentIndex = endIndex;
+            
+            if (currentIndex < sortedNewItems.length) {
+                requestAnimationFrame(renderBatch);
+            } else {
+                const renderTime = Date.now() - startTime;
+                console.log(`[UnifiedFeed] Appended ${sortedNewItems.length} items in ${renderTime}ms`);
+                // Render bounding box overlays for new items
+                this._renderBboxOverlays();
+            }
+        };
+        
+        // Start the rendering process
+        requestAnimationFrame(renderBatch);
+    }
+    
+    /**
+     * Append new items to timeline without re-rendering existing items (DEPRECATED - use _appendItemsToTimeline)
      */
     async _appendNewItemsToTimeline(newItems) {
         const startTime = Date.now();
@@ -2042,11 +2169,11 @@ class UnifiedFeed {
     _updateLoadMoreButton() {
         if (!this.loadMoreBtn || !this.loadMoreContainer) return;
         
-        console.log(`[UnifiedFeed] Updating Load More button: isLoading=${this.isLoading}`);
+        console.log(`[UnifiedFeed] Updating Load More button: isLoading=${this.isLoading}, hasMore=${this.hasMoreContent}`);
         
-        // Always show the button
-        this.loadMoreContainer.style.display = 'block';
-        this.loadMoreBtn.disabled = this.isLoading;
+        // For unified pagination, we need to check both local pages and API data availability
+        const allFilteredItems = this._applyFiltersToItems(this.allLoadedItems);
+        this._updateLoadMoreButtonForLocalPagination(allFilteredItems);
         
         const loadMoreText = document.getElementById('loadMoreText');
         const loadMoreSpinner = document.getElementById('loadMoreSpinner');
@@ -2348,15 +2475,12 @@ class UnifiedFeed {
         div.setAttribute('data-timestamp', marker.timestamp.toISOString());
         div.setAttribute('data-type', marker.type);
         
-        const markerClass = marker.type === 'day' ? 'time-marker-major' : 'time-marker-minor';
         const iconClass = marker.type === 'day' ? 'fas fa-calendar-day' : 'fas fa-clock';
         
         div.innerHTML = `
-            <div class="time-marker-line ${markerClass}">
-                <div class="time-marker-label">
-                    <i class="${iconClass}"></i>
-                    <span>${marker.label}</span>
-                </div>
+            <div class="time-marker-label">
+                <i class="${iconClass}"></i>
+                <span>${marker.label}</span>
             </div>
         `;
         

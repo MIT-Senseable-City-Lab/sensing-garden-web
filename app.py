@@ -844,6 +844,28 @@ def view_device_feed(device_id):
         traceback.print_exc()
         return render_template('error.html', error=str(e))
 
+@app.route('/test_pagination')
+def test_pagination():
+    """Test page for unified pagination functionality"""
+    return render_template('test_pagination.html')
+
+@app.route('/api/devices')
+def get_devices():
+    """API endpoint to get available devices for testing"""
+    try:
+        # Get unique device IDs from classifications
+        classification_response = client.classifications.fetch(limit=100)
+        devices = set()
+        
+        for item in classification_response.get('items', []):
+            if 'device_id' in item:
+                devices.add(item['device_id'])
+        
+        return jsonify(sorted(list(devices)))
+    except Exception as e:
+        print(f"[ERROR] Failed to fetch devices: {e}")
+        return jsonify([]), 500
+
 @app.route('/api/device/<device_id>/feed_data')
 def get_device_feed_data(device_id):
     """API endpoint for unified feed data fetching"""
