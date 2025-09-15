@@ -1,4 +1,3 @@
-import csv
 import io
 import json
 import os
@@ -509,160 +508,7 @@ def view_device_environment(device_id):
         table_name='environment'  # Pass table name for template customization
     )
 
-@app.route('/download_filtered/<table_type>')
-def download_filtered_csv(table_type):
-    """Download table data as CSV with date range filtering using backend export API"""
-    try:
-        # Get filter parameters
-        device_id = request.args.get('device_id')
-        start_time = request.args.get('start_time')
-        end_time = request.args.get('end_time')
-        
-        # Validate required parameters
-        if not device_id:
-            return jsonify({'error': 'device_id is required'}), 400
-        if not start_time:
-            return jsonify({'error': 'start_time is required'}), 400
-        if not end_time:
-            return jsonify({'error': 'end_time is required'}), 400
-            
-        # Validate table type
-        valid_tables = ['classifications', 'environment', 'videos', 'detections']
-        if table_type not in valid_tables:
-            return jsonify({'error': f'Invalid table type. Must be one of: {valid_tables}'}), 400
-        
-        # Convert dates to ISO format if needed
-        try:
-            # Parse and reformat dates to ensure ISO 8601 format
-            start_dt = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
-            end_dt = datetime.fromisoformat(end_time.replace('Z', '+00:00'))
-            start_time_iso = start_dt.isoformat()
-            end_time_iso = end_dt.isoformat()
-        except ValueError as e:
-            return jsonify({'error': f'Invalid date format: {str(e)}'}), 400
-        
-        # Validate date range - start date must be before end date
-        if start_dt >= end_dt:
-            return jsonify({'error': 'Start date must be before end date'}), 400
-        
-        # Validate reasonable date range (prevent extremely large ranges)
-        date_diff = (end_dt - start_dt).days
-        if date_diff > 365:
-            return jsonify({'error': 'Date range cannot exceed 365 days'}), 400
-        
-        # Validate dates are not in the future (with small buffer for clock skew)
-        from datetime import timezone, timedelta
-        now = datetime.now(timezone.utc)
-        # Allow up to 1 hour in the future to account for timezone/clock differences
-        future_threshold = now + timedelta(hours=1)
-        if end_dt > future_threshold:
-            return jsonify({'error': 'End date cannot be in the future'}), 400
-        
-        # Call the backend export API directly
-        import requests
-        base_url = os.getenv('API_BASE_URL')
-        api_key = os.getenv('SENSING_GARDEN_API_KEY')
-        
-        if not base_url or not api_key:
-            return jsonify({'error': 'API configuration not found'}), 500
-            
-        # Prepare export request parameters
-        params = {
-            'table': table_type,
-            'start_time': start_time_iso,
-            'end_time': end_time_iso,
-            'device_id': device_id,
-            'filename': f'{table_type}_{device_id}_{start_dt.strftime("%Y%m%d")}_{end_dt.strftime("%Y%m%d")}.csv'
-        }
-        
-        headers = {
-            'X-API-Key': api_key
-        }
-        
-        # Make request to backend export API
-        export_url = f'{base_url.rstrip("/")}/export'
-        response = requests.get(export_url, params=params, headers=headers, timeout=30)
-        
-        if response.status_code != 200:
-            error_msg = f'Export API returned status {response.status_code}'
-            try:
-                error_detail = response.json().get('error', 'Unknown error')
-                error_msg += f': {error_detail}'
-            except:
-                pass
-            return jsonify({'error': error_msg}), response.status_code
-        
-        # Return the CSV response from backend
-        csv_response = make_response(response.content)
-        csv_response.headers['Content-Type'] = 'text/csv'
-        csv_response.headers['Content-Disposition'] = response.headers.get('Content-Disposition', 
-                                                                           f'attachment; filename={params["filename"]}')
-        return csv_response
-        
-    except requests.RequestException as e:
-        return jsonify({'error': f'Failed to connect to export API: {str(e)}'}), 500
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
 
-@app.route('/download/<table_type>')
-def download_csv(table_type):
-    """Download table data as CSV"""
-    try:
-        # Fetch all data without pagination
-        if table_type == 'classifications':
-            device_id = request.args.get('device_id')
-            if not device_id:
-                return jsonify({'error': 'device_id is required for classifications'}), 400
-            response = client.classifications.fetch(
-                device_id=device_id,
-                limit=1000  # Fetch more data for download
-            )
-        elif table_type == 'models':
-            response = client.models.fetch(
-                limit=1000  # Fetch more data for download
-            )
-        elif table_type == 'videos':
-            device_id = request.args.get('device_id')
-            if not device_id:
-                return jsonify({'error': 'device_id is required for videos'}), 400
-            response = client.videos.fetch(
-                device_id=device_id,
-                limit=1000  # Fetch more data for download
-            )
-        elif table_type == 'environment':
-            device_id = request.args.get('device_id')
-            if not device_id:
-                return jsonify({'error': 'device_id is required for environment'}), 400
-            response = client.environment.fetch(
-                device_id=device_id,
-                limit=1000  # Fetch more data for download
-            )
-        else:
-            return jsonify({'error': 'Invalid table type'}), 400
-        
-        items = response.get('items', [])
-        if not items:
-            return jsonify({'error': 'No data found'}), 404
-        
-        # Get field names from the first item
-        field_names = list(items[0].keys())
-        
-        # Create CSV output
-        output = io.StringIO()
-        writer = csv.DictWriter(output, fieldnames=field_names)
-        writer.writeheader()
-        writer.writerows(items)
-        
-        # Create response
-        response = make_response(output.getvalue())
-        response.headers['Content-Type'] = 'text/csv'
-        if table_type == 'models':
-            response.headers['Content-Disposition'] = f'attachment; filename=models.csv'
-        else:
-            response.headers['Content-Disposition'] = f'attachment; filename={table_type}_{device_id}.csv'
-        return response
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
 
 
 @app.route('/image_proxy')
@@ -788,17 +634,13 @@ def view_device_videos(device_id):
         'next_url': next_url
     }
     
-    # Create download URL
-    download_url = url_for('download_csv', table_type='videos', device_id=device_id)
-    
-    return render_template('videos.html', 
-                           device_id=device_id, 
+    return render_template('videos.html',
+                           device_id=device_id,
                            items=result['items'],
                            fields=fields,
                            pagination=pagination,
                            current_sort_by=sort_by,
-                           current_sort_desc=sort_desc,
-                           download_url=download_url)
+                           current_sort_desc=sort_desc)
 
 @app.route('/view_device/<device_id>/feed')
 def view_device_feed(device_id):
@@ -905,6 +747,449 @@ def delete_device(device_id):
             'success': False,
             'error': str(e)
         }), 500
+
+# Sidara device configuration
+SIDARA_DEVICES = [
+    "b8f2ed92a70e5df3",
+    "e73325dab87ec077",
+    "d590bf3c30b2cf25"
+]
+
+def parse_sidara_timestamp(timestamp_str):
+    """Parse Sidara timestamp format like '2025-04-28T13-39-10-380729_0229'"""
+    try:
+        # Handle standard ISO format first
+        if 'T' in timestamp_str and ':' in timestamp_str:
+            if timestamp_str.endswith('Z'):
+                return datetime.fromisoformat(timestamp_str[:-1] + '+00:00')
+            else:
+                return datetime.fromisoformat(timestamp_str)
+
+        # Handle Sidara custom format: 2025-04-28T13-39-10-380729_0229
+        if 'T' in timestamp_str and '-' in timestamp_str.split('T')[1]:
+            date_part, time_part = timestamp_str.split('T')
+            # Split time part and remove frame number if present
+            if '_' in time_part:
+                time_part = time_part.split('_')[0]
+
+            # Replace hyphens with colons in time part: 13-39-10-380729 -> 13:39:10.380729
+            time_components = time_part.split('-')
+            if len(time_components) >= 3:
+                hours = time_components[0]
+                minutes = time_components[1]
+                seconds = time_components[2]
+                microseconds = time_components[3] if len(time_components) > 3 else '0'
+
+                # Format as standard timestamp
+                formatted_time = f"{hours}:{minutes}:{seconds}.{microseconds}"
+                iso_timestamp = f"{date_part}T{formatted_time}"
+                return datetime.fromisoformat(iso_timestamp)
+
+        # Fallback
+        return datetime.fromisoformat(timestamp_str)
+
+    except Exception as e:
+        print(f"Warning: Could not parse timestamp {timestamp_str}: {e}")
+        return None
+
+def apply_false_positive_filtering(classifications, confidence_threshold=0.05, species_spacing_minutes=5, detection_rate_limit=5.0, session_min_duration=5):
+    """Apply sophisticated false positive filtering based on the analysis methodology with configurable parameters"""
+    if not classifications:
+        return []
+
+    filtered = []
+    from datetime import datetime
+    import collections
+
+    # 1. Confidence Score Filtering (configurable threshold)
+    confidence_filtered = [item for item in classifications if item.get('species_confidence', item.get('confidence', 0)) >= confidence_threshold]
+
+    # 2. Temporal Pattern Analysis - detect and filter burst/testing patterns
+    timestamps = []
+    for item in confidence_filtered:
+        timestamp = item.get('timestamp')
+        if timestamp:
+            dt = parse_sidara_timestamp(timestamp)
+            if dt:
+                timestamps.append((dt, item))
+
+    # Sort by timestamp
+    timestamps.sort(key=lambda x: x[0])
+
+    # 3. Session-Based Filtering - identify sustained vs. calibration sessions
+    session_groups = []
+    current_session = []
+
+    for i, (dt, item) in enumerate(timestamps):
+        if i == 0:
+            current_session = [item]
+        else:
+            prev_dt = timestamps[i-1][0]
+            time_diff = (dt - prev_dt).total_seconds() / 60  # minutes
+
+            # If gap > 60 minutes, start new session
+            if time_diff > 60:
+                if len(current_session) > 0:
+                    session_groups.append(current_session)
+                current_session = [item]
+            else:
+                current_session.append(item)
+
+    if current_session:
+        session_groups.append(current_session)
+
+    # 4. Filter sessions - only include sustained periods (configurable minimum duration)
+    for session in session_groups:
+        if len(session) >= 3:  # At least 3 detections in session
+            # Check for burst patterns (many detections in short time)
+            session_timestamps = []
+            for item in session:
+                timestamp = item.get('timestamp')
+                if timestamp:
+                    dt = parse_sidara_timestamp(timestamp)
+                    if dt:
+                        session_timestamps.append(dt)
+
+            if len(session_timestamps) >= 2:
+                session_duration = (max(session_timestamps) - min(session_timestamps)).total_seconds() / 60
+                detection_rate = len(session) / session_duration if session_duration > 0 else float('inf')
+
+                # Filter sessions based on configurable criteria
+                if detection_rate <= detection_rate_limit and session_duration >= session_min_duration:
+                    filtered.extend(session)
+
+    # 5. Species-specific burst filtering - remove repetitive species in short timeframes (configurable spacing)
+    final_filtered = []
+    species_timestamps = collections.defaultdict(list)
+
+    for item in filtered:
+        species = item.get('species', item.get('predicted_class', 'Unknown'))
+        timestamp = item.get('timestamp')
+        if timestamp:
+            dt = parse_sidara_timestamp(timestamp)
+            if dt:
+                species_timestamps[species].append((dt, item))
+
+    # For each species, filter out rapid repeats based on configurable spacing
+    for species, detections in species_timestamps.items():
+        detections.sort(key=lambda x: x[0])
+
+        # Only include if there's reasonable spacing between detections of same species
+        for i, (dt, item) in enumerate(detections):
+            if i == 0:
+                final_filtered.append(item)
+            else:
+                prev_dt = detections[i-1][0]
+                time_diff = (dt - prev_dt).total_seconds() / 60
+
+                # Only include if spacing is greater than the configured threshold
+                if time_diff > species_spacing_minutes:
+                    final_filtered.append(item)
+
+    return final_filtered
+
+@app.route('/sidara')
+def sidara_analysis():
+    """Interactive video categorization interface for Sidara devices"""
+    try:
+        # Initialize video data structure
+        video_data = {
+            'videos': [],
+            'total_videos': 0,
+            'devices': SIDARA_DEVICES
+        }
+
+        # Fetch video data from all three Sidara devices
+        for device_id in SIDARA_DEVICES:
+            print(f"Fetching videos for device: {device_id}")
+
+            try:
+                # Get video count for this device
+                videos_count = client.videos.count(device_id=device_id)
+                print(f"Device {device_id} has {videos_count} videos")
+
+                if videos_count > 0:
+                    # Fetch all videos with larger limit to get comprehensive data
+                    videos_response = client.videos.fetch(
+                        device_id=device_id,
+                        limit=1000,  # Get comprehensive video data
+                        sort_by='timestamp',
+                        sort_desc=True
+                    )
+
+                    device_videos = videos_response.get('items', [])
+                    print(f"Retrieved {len(device_videos)} videos for device {device_id}")
+
+                    # Process each video and add device info
+                    for video in device_videos:
+                        video_entry = {
+                            'device_id': device_id,
+                            'video_id': f"{device_id}_{video.get('timestamp', 'unknown')}",
+                            'video_url': video.get('video_url'),
+                            'timestamp': video.get('timestamp'),
+                            'formatted_time': video.get('formatted_time'),
+                            'duration': video.get('duration', 0),  # Duration in seconds if available
+                            'metadata': video.get('metadata', {}),
+                            # We'll extract these in the frontend from video_url for thumbnails
+                            'thumbnail_url': video.get('thumbnail_url') or video.get('video_url')
+                        }
+                        video_data['videos'].append(video_entry)
+
+                video_data['total_videos'] += videos_count
+
+            except Exception as e:
+                print(f"Error fetching videos for device {device_id}: {str(e)}")
+                continue
+
+        # Sort all videos by timestamp (newest first)
+        video_data['videos'].sort(key=lambda x: x.get('timestamp', ''), reverse=True)
+
+        print(f"Sidara video categorization ready: {len(video_data['videos'])} total videos from {len(SIDARA_DEVICES)} devices")
+
+        return render_template('sidara.html', video_data=video_data)
+
+    except Exception as e:
+        print(f"Error in Sidara video interface: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return render_template('error.html', error=str(e))
+
+@app.route('/species/<species_name>')
+def species_detail(species_name):
+    """Detailed view of all detections for a specific species using live data"""
+    try:
+        species_data = {
+            'species_name': species_name,
+            'all_detections': [],
+            'total_detections': 0,
+            'confidence_stats': {},
+            'temporal_distribution': {},
+            'device_breakdown': {}
+        }
+
+        # Collect all detections for this species across all Sidara devices
+        for device_id in SIDARA_DEVICES:
+            try:
+                classifications_count = client.classifications.count(device_id=device_id)
+
+                if classifications_count > 0:
+                    print(f"Fetching species data for {species_name} from device {device_id}")
+
+                    # Fetch classifications for this device
+                    classifications_response = client.classifications.fetch(
+                        device_id=device_id,
+                        limit=1000,  # Get comprehensive data for species detail view
+                        sort_by='timestamp',
+                        sort_desc=True
+                    )
+
+                    device_classifications = classifications_response.get('items', [])
+
+                    # Apply false positive filtering with relaxed parameters
+                    filtered_classifications = apply_false_positive_filtering(
+                        device_classifications,
+                        confidence_threshold=0.03,  # Lower threshold
+                        species_spacing_minutes=1,  # Much shorter spacing
+                        detection_rate_limit=50.0,  # Even higher rate limit to include busy sessions
+                        session_min_duration=1      # Shorter minimum duration
+                    )
+
+                    # Filter for specific species with case-insensitive matching
+                    species_detections = [
+                        item for item in filtered_classifications
+                        if item.get('species', item.get('predicted_class', '')).lower() == species_name.lower()
+                        and item.get('species_confidence', item.get('confidence', 0)) >= 0.05
+                    ]
+
+                    print(f"Found {len(species_detections)} detections of {species_name} from device {device_id}")
+
+                    # Process each detection
+                    for item in species_detections:
+                        detection = {
+                            'image_url': item.get('image_url'),
+                            'timestamp': item.get('timestamp'),
+                            'device_id': device_id,
+                            'confidence': item.get('species_confidence', item.get('confidence', 0)),
+                            'metadata': item.get('metadata', {}),
+                            'bbox': item.get('bounding_box', item.get('bbox')),
+                            'formatted_timestamp': None
+                        }
+
+                        # Format timestamp for display
+                        if detection['timestamp']:
+                            dt = parse_sidara_timestamp(detection['timestamp'])
+                            if dt:
+                                detection['formatted_timestamp'] = dt.strftime('%Y-%m-%d %H:%M:%S')
+
+                        species_data['all_detections'].append(detection)
+
+                    # Update device breakdown
+                    if len(species_detections) > 0:
+                        species_data['device_breakdown'][device_id] = {
+                            'count': len(species_detections),
+                            'device_name': f'Sidara Device {device_id[:8]}...'
+                        }
+
+            except Exception as e:
+                print(f"Error fetching species data for device {device_id}: {str(e)}")
+                continue
+
+        # Sort all detections by confidence (highest first)
+        species_data['all_detections'].sort(key=lambda x: x['confidence'], reverse=True)
+        species_data['total_detections'] = len(species_data['all_detections'])
+
+        # Calculate confidence statistics
+        if species_data['all_detections']:
+            confidences = [d['confidence'] for d in species_data['all_detections']]
+            species_data['confidence_stats'] = {
+                'min': min(confidences),
+                'max': max(confidences),
+                'avg': sum(confidences) / len(confidences),
+                'median': sorted(confidences)[len(confidences)//2]
+            }
+
+        # Temporal distribution analysis
+        temporal_counts = {}
+        for detection in species_data['all_detections']:
+            if detection['formatted_timestamp']:
+                date_key = detection['formatted_timestamp'][:10]  # YYYY-MM-DD
+                temporal_counts[date_key] = temporal_counts.get(date_key, 0) + 1
+
+        species_data['temporal_distribution'] = dict(sorted(temporal_counts.items()))
+
+        print(f"Species detail complete for {species_name}: {species_data['total_detections']} total detections across {len(species_data['device_breakdown'])} devices")
+
+        return render_template('species_detail.html', data=species_data)
+
+    except Exception as e:
+        print(f"Error in species detail view: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return render_template('error.html', error=str(e))
+
+@app.route('/sidara/filtered-analysis', methods=['POST'])
+def sidara_filtered_analysis():
+    """Apply interactive filtering to live Sidara data and return results"""
+    try:
+        # Get filter parameters from request
+        filter_params = request.get_json()
+        confidence_threshold = filter_params.get('confidence_threshold', 0.15)
+        species_spacing_minutes = filter_params.get('species_spacing_minutes', 5)
+        detection_rate_limit = filter_params.get('detection_rate_limit', 1.0)
+        session_min_duration = filter_params.get('session_min_duration', 30)
+
+        print(f"[DEBUG] Applying filtering with params: confidence={confidence_threshold}, spacing={species_spacing_minutes}, rate={detection_rate_limit}, duration={session_min_duration}")
+
+        # Collect all classifications from all Sidara devices
+        all_classifications = []
+
+        for device_id in SIDARA_DEVICES:
+            try:
+                classifications_count = client.classifications.count(device_id=device_id)
+
+                if classifications_count > 0:
+                    # Fetch all classifications for comprehensive filtering
+                    classifications_response = client.classifications.fetch(
+                        device_id=device_id,
+                        limit=1000,  # Get comprehensive data
+                        sort_by='timestamp',
+                        sort_desc=True
+                    )
+
+                    device_classifications = classifications_response.get('items', [])
+                    all_classifications.extend(device_classifications)
+
+            except Exception as e:
+                print(f"[ERROR] Error fetching data for device {device_id}: {str(e)}")
+                continue
+
+        print(f"[DEBUG] Total raw classifications: {len(all_classifications)}")
+
+        # Apply filtering with custom parameters
+        filtered_classifications = apply_false_positive_filtering(
+            all_classifications,
+            confidence_threshold=confidence_threshold,
+            species_spacing_minutes=species_spacing_minutes,
+            detection_rate_limit=detection_rate_limit,
+            session_min_duration=session_min_duration
+        )
+
+        print(f"[DEBUG] Filtered classifications: {len(filtered_classifications)}")
+
+        # Analyze species from filtered data
+        species_summary = {}
+        for item in filtered_classifications:
+            species = item.get('species', item.get('predicted_class', 'Unknown'))
+            confidence = item.get('species_confidence', item.get('confidence', 0))
+            timestamp = item.get('timestamp')
+
+            if species not in species_summary:
+                species_summary[species] = {
+                    'count': 0,
+                    'avg_confidence': 0,
+                    'total_confidence': 0,
+                    'recent_images': []
+                }
+
+            species_summary[species]['count'] += 1
+            species_summary[species]['total_confidence'] += confidence
+            species_summary[species]['avg_confidence'] = (
+                species_summary[species]['total_confidence'] / species_summary[species]['count']
+            )
+
+            # Add image info for preview (top 3 highest confidence per species)
+            if len(species_summary[species]['recent_images']) < 3:
+                if 'image_url' in item:
+                    detection_data = {
+                        'image_url': item.get('image_url'),
+                        'timestamp': timestamp,
+                        'device_id': item.get('device_id', 'unknown'),
+                        'confidence': confidence
+                    }
+                    species_summary[species]['recent_images'].append(detection_data)
+
+        # Sort species by count
+        sorted_species = sorted(
+            species_summary.items(),
+            key=lambda x: x[1]['count'],
+            reverse=True
+        )
+
+        # Calculate statistics
+        raw_count = len(all_classifications)
+        filtered_count = len(filtered_classifications)
+        reduction_percent = round(((raw_count - filtered_count) / raw_count * 100) if raw_count > 0 else 0, 1)
+        species_count = len(species_summary)
+
+        # Format species data for frontend
+        species_data = []
+        for species_name, info in sorted_species:
+            species_data.append({
+                'name': species_name,
+                'count': info['count'],
+                'avg_confidence': info['avg_confidence'],
+                'recent_images': info['recent_images']
+            })
+
+        response_data = {
+            'raw_count': raw_count,
+            'filtered_count': filtered_count,
+            'reduction_percent': reduction_percent,
+            'total_species': species_count,  # Match frontend expectations
+            'total_detections': filtered_count,  # Add total detections count
+            'sorted_species': sorted_species,  # Match frontend expectations
+            'species_data': species_data  # Keep legacy format as backup
+        }
+
+        print(f"[DEBUG] Returning response: {raw_count} -> {filtered_count} ({reduction_percent}% reduction), {species_count} species")
+
+        return jsonify(response_data)
+
+    except Exception as e:
+        print(f"[ERROR] Error in filtered analysis: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
     # Get port from environment variable or default to 8080

@@ -1,0 +1,260 @@
+{% extends "base.html" %}
+
+{% block title %}{{ data.species_name }} - Species Detail{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <!-- Header -->
+    <div class="row">
+        <div class="col-12">
+            <nav aria-label="breadcrumb">
+                <ol class="breadcrumb">
+                    <li class="breadcrumb-item"><a href="{{ url_for('sidara_analysis') }}">Sidara Analysis</a></li>
+                    <li class="breadcrumb-item active" aria-current="page">{{ data.species_name }}</li>
+                </ol>
+            </nav>
+
+            <h1 class="mb-2">{{ data.species_name }}</h1>
+            <p class="lead text-muted mb-4">Detailed Analysis of Filtered Detections</p>
+        </div>
+    </div>
+
+    <!-- Summary Statistics -->
+    <div class="row mb-4">
+        <div class="col-md-3">
+            <div class="card text-center">
+                <div class="card-body">
+                    <h3 class="text-primary">{{ data.total_detections }}</h3>
+                    <p class="mb-0">Total Filtered Detections</p>
+                    <small class="text-muted">After false positive filtering</small>
+                </div>
+            </div>
+        </div>
+        {% if data.confidence_stats %}
+        <div class="col-md-3">
+            <div class="card text-center">
+                <div class="card-body">
+                    <h3 class="text-success">{{ "%.1f%%" | format(data.confidence_stats.max * 100) }}</h3>
+                    <p class="mb-0">Highest Confidence</p>
+                    <small class="text-muted">Max: {{ "%.3f" | format(data.confidence_stats.max) }}</small>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-center">
+                <div class="card-body">
+                    <h3 class="text-info">{{ "%.1f%%" | format(data.confidence_stats.avg * 100) }}</h3>
+                    <p class="mb-0">Average Confidence</p>
+                    <small class="text-muted">Range: {{ "%.3f" | format(data.confidence_stats.min) }} - {{ "%.3f" | format(data.confidence_stats.max) }}</small>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+        <div class="col-md-3">
+            <div class="card text-center">
+                <div class="card-body">
+                    <h3 class="text-warning">{{ data.device_breakdown | length }}</h3>
+                    <p class="mb-0">Active Devices</p>
+                    <small class="text-muted">With detections</small>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Filtering Info -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="alert alert-info">
+                <h6>🔍 Applied Filtering Methods</h6>
+                <div class="row">
+                    <div class="col-md-6">
+                        <ul class="small mb-0">
+                            <li><strong>Confidence Threshold:</strong> ≥ 15% (0.15)</li>
+                            <li><strong>Temporal Pattern Analysis:</strong> Burst detection filtering</li>
+                            <li><strong>Session Duration:</strong> Excluded calibration sessions</li>
+                        </ul>
+                    </div>
+                    <div class="col-md-6">
+                        <ul class="small mb-0">
+                            <li><strong>Species Spacing:</strong> Min 5 minutes between same species detections</li>
+                            <li><strong>Detection Rate:</strong> Max 1 detection/minute (natural patterns)</li>
+                            <li><strong>Quality Control:</strong> Conservative filtering prioritized</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Device Breakdown -->
+    {% if data.device_breakdown %}
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">Device Breakdown</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        {% for device_id, info in data.device_breakdown.items() %}
+                        <div class="col-md-4 mb-3">
+                            <div class="card border-secondary">
+                                <div class="card-body text-center">
+                                    <h6 class="card-title">{{ device_id[:8] }}...</h6>
+                                    <h4 class="text-primary">{{ info.count }}</h4>
+                                    <p class="small text-muted mb-0">{{ info.device_name }}</p>
+                                </div>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Temporal Distribution -->
+    {% if data.temporal_distribution %}
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">Temporal Distribution</h5>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-sm">
+                            <thead>
+                                <tr>
+                                    <th>Date</th>
+                                    <th>Detections</th>
+                                    <th>Distribution</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for date, count in data.temporal_distribution.items() %}
+                                <tr>
+                                    <td>{{ date }}</td>
+                                    <td><span class="badge badge-primary">{{ count }}</span></td>
+                                    <td>
+                                        <div class="progress" style="height: 20px;">
+                                            <div class="progress-bar" role="progressbar"
+                                                 style="width: {{ (count / data.total_detections * 100) | round }}%">
+                                                {{ "%.1f%%" | format(count / data.total_detections * 100) }}
+                                            </div>
+                                        </div>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- All Detections Gallery -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="card-title mb-0">All Filtered Detections</h5>
+                    <small class="text-muted">Sorted by confidence (highest first)</small>
+                </div>
+                <div class="card-body">
+                    {% if data.all_detections %}
+                    <div class="row">
+                        {% for detection in data.all_detections %}
+                        <div class="col-lg-3 col-md-4 col-sm-6 mb-4">
+                            <div class="card h-100">
+                                <div class="position-relative">
+                                    {% if detection.image_url %}
+                                    <img
+                                        src="{{ url_for('image_proxy') }}?url={{ detection.image_url | urlencode }}"
+                                        class="card-img-top cursor-pointer"
+                                        style="height: 200px; object-fit: cover;"
+                                        onclick="showImageModal('{{ detection.image_url }}', '{{ data.species_name }} - {{ detection.device_id[:8] }}...', '{{ detection.formatted_timestamp }}')"
+                                        title="Click to view full size"
+                                    >
+                                    {% else %}
+                                    <div class="card-img-top bg-light d-flex align-items-center justify-content-center" style="height: 200px;">
+                                        <span class="text-muted">No Image</span>
+                                    </div>
+                                    {% endif %}
+
+                                    <!-- Confidence Badge -->
+                                    <span class="position-absolute badge badge-dark" style="top: 10px; right: 10px;">
+                                        {{ "%.1f%%" | format(detection.confidence * 100) }}
+                                    </span>
+                                </div>
+
+                                <div class="card-body">
+                                    <h6 class="card-title">{{ detection.formatted_timestamp or 'Unknown time' }}</h6>
+                                    <p class="card-text small">
+                                        <strong>Device:</strong> {{ detection.device_id[:8] }}...<br>
+                                        <strong>Confidence:</strong> {{ "%.3f" | format(detection.confidence) }}<br>
+                                        {% if detection.bbox %}
+                                        <strong>Bounding Box:</strong> Available<br>
+                                        {% endif %}
+                                    </p>
+                                </div>
+
+                                <div class="card-footer">
+                                    <div class="btn-group btn-group-sm w-100" role="group">
+                                        {% if detection.image_url %}
+                                        <button type="button" class="btn btn-outline-primary"
+                                                onclick="showImageModal('{{ detection.image_url }}', '{{ data.species_name }}', '{{ detection.formatted_timestamp }}')">
+                                            View Full
+                                        </button>
+                                        <a href="{{ url_for('image_proxy') }}?url={{ detection.image_url | urlencode }}&download=1"
+                                           class="btn btn-outline-secondary" target="_blank">
+                                            Download
+                                        </a>
+                                        {% else %}
+                                        <button type="button" class="btn btn-outline-secondary" disabled>
+                                            No Image
+                                        </button>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% else %}
+                    <div class="text-center py-5">
+                        <p class="text-muted">No detections found after applying false positive filters.</p>
+                        <p class="small">This species may have been filtered out due to low confidence scores or burst detection patterns.</p>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Back to Overview -->
+    <div class="row">
+        <div class="col-12 text-center">
+            <a href="{{ url_for('sidara_analysis') }}" class="btn btn-primary">
+                ← Back to Sidara Analysis
+            </a>
+        </div>
+    </div>
+</div>
+
+<script>
+function showImageModal(imageUrl, title, timestamp) {
+    $('#imageModalLabel').text(title + (timestamp ? ' - ' + timestamp : ''));
+    $('#modal-image').attr('src', '{{ url_for("image_proxy") }}?url=' + encodeURIComponent(imageUrl));
+    $('#modal-download').attr('onclick', 'downloadImage("' + imageUrl + '")');
+    $('#imageModal').modal('show');
+}
+
+function downloadImage(imageUrl) {
+    window.open('{{ url_for("image_proxy") }}?url=' + encodeURIComponent(imageUrl) + '&download=1', '_blank');
+}
+</script>
+{% endblock %}
