@@ -28,7 +28,7 @@
     } %}
 
     {{ render_table('modelsTable', models, field_names,
-    url_for('download_csv', table_type='models', device_id=None), pagination) }}
+    None, pagination) }}
 
     {% else %}
     <div class="alert alert-info">

@@ -536,6 +536,75 @@ def image_proxy():
     except requests.RequestException as exc:
         return jsonify({'error': str(exc)}), 500
 
+@app.route('/video_frame_proxy')
+def video_frame_proxy():
+    """Generate a poster frame/thumbnail from a video URL using FFmpeg or similar."""
+    video_url = request.args.get('url')
+    if not video_url:
+        return jsonify({'error': 'url parameter required'}), 400
+
+    # Limit to S3 video URLs for security
+    allowed_prefixes = [
+        'https://scl-sensing-garden-videos.s3.amazonaws.com/',
+        'https://scl-sensing-garden-images.s3.amazonaws.com/'
+    ]
+    if not any(video_url.startswith(prefix) for prefix in allowed_prefixes):
+        return jsonify({'error': 'URL not allowed'}), 400
+
+    try:
+        import subprocess
+        import tempfile
+        import base64
+
+        # Check if ffmpeg is available
+        try:
+            subprocess.run(['ffmpeg', '-version'], capture_output=True, check=True, timeout=5)
+        except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+            # FFmpeg not available, return error
+            return jsonify({'error': 'Video processing not available'}), 503
+
+        # Create temporary file for thumbnail
+        with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as temp_file:
+            temp_path = temp_file.name
+
+        try:
+            # Extract first frame using FFmpeg with timeout
+            cmd = [
+                'ffmpeg', '-i', video_url, '-ss', '00:00:01', '-vframes', '1',
+                '-q:v', '2', '-f', 'image2', temp_path, '-y'
+            ]
+
+            result = subprocess.run(cmd, capture_output=True, timeout=15)
+
+            if result.returncode == 0:
+                # Read the generated thumbnail
+                with open(temp_path, 'rb') as f:
+                    thumbnail_data = f.read()
+
+                # Clean up temp file
+                os.unlink(temp_path)
+
+                # Return thumbnail as response
+                response = make_response(thumbnail_data)
+                response.headers['Content-Type'] = 'image/jpeg'
+                response.headers['Access-Control-Allow-Origin'] = '*'
+                response.headers['Cache-Control'] = 'public, max-age=3600'  # Cache for 1 hour
+                return response
+            else:
+                # Clean up temp file on error
+                if os.path.exists(temp_path):
+                    os.unlink(temp_path)
+                return jsonify({'error': 'Failed to extract video frame'}), 500
+
+        except subprocess.TimeoutExpired:
+            # Clean up temp file on timeout
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
+            return jsonify({'error': 'Video processing timeout'}), 504
+
+    except Exception as e:
+        return jsonify({'error': f'Video processing failed: {str(e)}'}), 500
+
 @app.route('/add_model', methods=['GET'])
 def add_model():
     """Show the form to add a new model"""

@@ -108,13 +108,33 @@
                     <!-- Video Thumbnail/Preview -->
                     <div class="video-preview-container position-relative">
                         {% if video.video_url %}
-                        <video class="video-thumbnail"
-                               data-src="{{ video.video_url }}"
-                               muted
-                               style="width: 100%; height: 200px; object-fit: cover; cursor: pointer;"
-                               onclick="toggleVideoSelection('{{ video.video_id }}')">
-                            <source src="{{ video.video_url }}" type="video/mp4">
-                        </video>
+                        <div class="video-thumbnail-wrapper" style="width: 100%; height: 200px; position: relative; cursor: pointer;" onclick="toggleVideoSelection('{{ video.video_id }}')">
+                            <!-- Loading placeholder -->
+                            <div class="thumbnail-loading bg-light d-flex align-items-center justify-content-center" style="width: 100%; height: 100%; position: absolute; top: 0; left: 0;">
+                                <div class="spinner-border spinner-border-sm text-primary" role="status">
+                                    <span class="sr-only">Loading...</span>
+                                </div>
+                                <span class="text-muted ml-2">Loading thumbnail...</span>
+                            </div>
+
+                            <!-- Canvas for thumbnail -->
+                            <canvas class="video-thumbnail-canvas"
+                                    data-video-url="{{ video.video_url|safe }}"
+                                    style="width: 100%; height: 100%; object-fit: cover; display: none; position: absolute; top: 0; left: 0;">
+                            </canvas>
+
+                            <!-- Fallback image -->
+                            <img class="video-thumbnail-fallback"
+                                 style="width: 100%; height: 100%; object-fit: cover; display: none; position: absolute; top: 0; left: 0;"
+                                 alt="Video thumbnail">
+
+                            <!-- Error placeholder -->
+                            <div class="thumbnail-error bg-light d-flex align-items-center justify-content-center flex-column" style="width: 100%; height: 100%; position: absolute; top: 0; left: 0; display: none;">
+                                <i class="fas fa-video text-muted mb-2" style="font-size: 2rem;"></i>
+                                <span class="text-muted">Video Preview</span>
+                                <small class="text-muted">{{ video.duration }}s</small>
+                            </div>
+                        </div>
                         {% else %}
                         <div class="bg-light d-flex align-items-center justify-content-center" style="height: 200px; cursor: pointer;" onclick="toggleVideoSelection('{{ video.video_id }}')">
                             <span class="text-muted">No Video</span>
@@ -513,24 +533,130 @@ function clearAllData() {
     }
 }
 
-// Load video thumbnails lazily
+// Load video thumbnails using client-side extraction
 document.addEventListener('DOMContentLoaded', function() {
     const observer = new IntersectionObserver((entries) => {
         entries.forEach(entry => {
             if (entry.isIntersecting) {
-                const video = entry.target;
-                const src = video.dataset.src;
-                if (src && !video.src) {
-                    video.src = src;
-                    video.load();
+                const canvas = entry.target;
+                const videoUrl = canvas.dataset.videoUrl;
+                if (videoUrl && !canvas.dataset.processed) {
+                    canvas.dataset.processed = 'true';
+                    extractVideoThumbnail(canvas);
                 }
             }
         });
     });
 
-    document.querySelectorAll('.video-thumbnail').forEach(video => {
-        observer.observe(video);
+    document.querySelectorAll('.video-thumbnail-canvas').forEach(canvas => {
+        observer.observe(canvas);
     });
 });
+
+function extractVideoThumbnail(canvas) {
+    const videoUrl = canvas.dataset.videoUrl;
+    const wrapper = canvas.closest('.video-thumbnail-wrapper');
+    const loadingDiv = wrapper.querySelector('.thumbnail-loading');
+    const fallbackImg = wrapper.querySelector('.video-thumbnail-fallback');
+    const errorDiv = wrapper.querySelector('.thumbnail-error');
+
+    // Create a hidden video element for frame extraction
+    const video = document.createElement('video');
+    video.crossOrigin = 'anonymous';
+    video.muted = true;
+    video.style.display = 'none';
+
+    let thumbnailExtracted = false;
+
+    // Setup video event handlers
+    video.addEventListener('loadeddata', function() {
+        if (thumbnailExtracted) return;
+
+        try {
+            // Set video time to 1 second to get a better frame
+            this.currentTime = Math.min(1, this.duration * 0.1);
+        } catch (e) {
+            console.warn('Could not set video time:', e);
+            extractFrame();
+        }
+    });
+
+    video.addEventListener('seeked', extractFrame);
+
+    video.addEventListener('canplay', function() {
+        if (thumbnailExtracted) return;
+        // Fallback if seeked event doesn't fire
+        setTimeout(extractFrame, 100);
+    });
+
+    video.addEventListener('error', function(e) {
+        console.warn('Video load error, trying server fallback:', e);
+        tryServerFallback();
+    });
+
+    function extractFrame() {
+        if (thumbnailExtracted) return;
+        thumbnailExtracted = true;
+
+        try {
+            // Set canvas size to video dimensions
+            canvas.width = video.videoWidth || 640;
+            canvas.height = video.videoHeight || 360;
+
+            // Draw video frame to canvas
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+            // Show canvas and hide loading
+            loadingDiv.style.display = 'none';
+            canvas.style.display = 'block';
+
+            // Clean up video element
+            video.remove();
+
+        } catch (e) {
+            console.warn('Canvas extraction failed, trying server fallback:', e);
+            tryServerFallback();
+        }
+    }
+
+    function tryServerFallback() {
+        if (thumbnailExtracted) return;
+        thumbnailExtracted = true;
+
+        // Try server-side frame extraction
+        const frameUrl = `/video_frame_proxy?url=${encodeURIComponent(videoUrl)}`;
+
+        fallbackImg.onload = function() {
+            loadingDiv.style.display = 'none';
+            fallbackImg.style.display = 'block';
+            video.remove();
+        };
+
+        fallbackImg.onerror = function() {
+            // Final fallback - show error placeholder
+            loadingDiv.style.display = 'none';
+            errorDiv.style.display = 'flex';
+            video.remove();
+        };
+
+        fallbackImg.src = frameUrl;
+    }
+
+    // Add video to DOM and start loading (hidden)
+    document.body.appendChild(video);
+
+    // Add timeout to prevent hanging
+    setTimeout(() => {
+        if (!thumbnailExtracted) {
+            console.warn('Thumbnail extraction timeout, using server fallback');
+            tryServerFallback();
+        }
+    }, 5000);
+
+    // Start video loading
+    video.src = videoUrl;
+    video.load();
+}
 </script>
 {% endblock %}

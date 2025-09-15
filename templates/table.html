@@ -1,5 +1,6 @@
 {% macro render_table(table_id, items, headers, download_url, pagination=None, page_limit=50) %}
 <!-- Controls outside of the table-responsive area -->
+{% if download_url %}
 <div class="mb-3">
     <div class="d-flex justify-content-between align-items-center">
         <div>
@@ -7,6 +8,7 @@
         </div>
     </div>
 </div>
+{% endif %}
 
 <div class="mb-3 d-flex justify-content-between align-items-center">
     <div id="{{ table_id }}_info" class="dataTables_info">Showing up to {{ page_limit }} items per page</div>
