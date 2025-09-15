@@ -536,6 +536,50 @@ def image_proxy():
     except requests.RequestException as exc:
         return jsonify({'error': str(exc)}), 500
 
+@app.route('/sidara/load-more-videos')
+def sidara_load_more_videos():
+    """Load more videos for pagination"""
+    try:
+        device_id = request.args.get('device_id')
+        offset = int(request.args.get('offset', 0))
+        limit = int(request.args.get('limit', 30))
+
+        if not device_id:
+            return jsonify({'error': 'device_id required'}), 400
+
+        videos_response = client.videos.fetch(
+            device_id=device_id,
+            limit=limit,
+            offset=offset,
+            sort_by='timestamp',
+            sort_desc=True
+        )
+
+        device_videos = videos_response.get('items', [])
+        processed_videos = []
+
+        for video in device_videos:
+            video_entry = {
+                'device_id': device_id,
+                'video_id': f"{device_id}_{video.get('timestamp', 'unknown')}",
+                'video_url': video.get('video_url'),
+                'timestamp': video.get('timestamp'),
+                'formatted_time': video.get('formatted_time'),
+                'duration': video.get('duration', 0),
+                'metadata': video.get('metadata', {}),
+                'thumbnail_url': video.get('thumbnail_url') or video.get('video_url')
+            }
+            processed_videos.append(video_entry)
+
+        return jsonify({
+            'videos': processed_videos,
+            'count': len(processed_videos)
+        })
+
+    except Exception as e:
+        print(f"Error loading more videos: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/video_frame_proxy')
 def video_frame_proxy():
     """Generate a poster frame/thumbnail from a video URL using FFmpeg or similar."""
@@ -978,10 +1022,10 @@ def sidara_analysis():
                 print(f"Device {device_id} has {videos_count} videos")
 
                 if videos_count > 0:
-                    # Fetch all videos with larger limit to get comprehensive data
+                    # Fetch only first batch of videos for faster initial load
                     videos_response = client.videos.fetch(
                         device_id=device_id,
-                        limit=1000,  # Get comprehensive video data
+                        limit=30,  # Reduced for much faster initial load
                         sort_by='timestamp',
                         sort_desc=True
                     )
@@ -1013,9 +1057,13 @@ def sidara_analysis():
         # Sort all videos by timestamp (newest first)
         video_data['videos'].sort(key=lambda x: x.get('timestamp', ''), reverse=True)
 
-        print(f"Sidara video categorization ready: {len(video_data['videos'])} total videos from {len(SIDARA_DEVICES)} devices")
+        # Add metadata for pagination
+        video_data['displayed_videos'] = len(video_data['videos'])
+        video_data['initial_batch_size'] = 30
 
-        return render_template('sidara.html', video_data=video_data)
+        print(f"Sidara video categorization ready: {len(video_data['videos'])} videos loaded (of {video_data['total_videos']} total) from {len(SIDARA_DEVICES)} devices")
+
+        return render_template('sidara.html', data=video_data)
 
     except Exception as e:
         print(f"Error in Sidara video interface: {str(e)}")
