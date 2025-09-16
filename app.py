@@ -651,12 +651,21 @@ def sidara_load_more_videos():
         print(f"Error loading more videos: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
-@app.route('/video_frame_proxy')
+@app.route('/video_frame_proxy', methods=['GET', 'POST'])
 def video_frame_proxy():
     """Generate a poster frame/thumbnail from a video URL using FFmpeg or similar."""
-    video_url = request.args.get('url')
+
+    # Support both GET (with URL in query param) and POST (with URL in body)
+    if request.method == 'POST':
+        data = request.get_json()
+        video_url = data.get('url') if data else None
+    else:
+        video_url = request.args.get('url')
+
     if not video_url:
         return jsonify({'error': 'url parameter required'}), 400
+
+    # No need for URL decoding since we're handling it properly now
 
     # Limit to S3 video URLs for security
     allowed_prefixes = [
@@ -670,11 +679,12 @@ def video_frame_proxy():
         import subprocess
         import tempfile
         import base64
+        import os
 
         # Check if ffmpeg is available
         try:
             subprocess.run(['ffmpeg', '-version'], capture_output=True, check=True, timeout=5)
-        except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+        except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired) as e:
             # FFmpeg not available, return error
             return jsonify({'error': 'Video processing not available'}), 503
 
@@ -684,27 +694,34 @@ def video_frame_proxy():
 
         try:
             # Extract first frame using FFmpeg with timeout
+            # Use -loglevel error to reduce verbose output
             cmd = [
-                'ffmpeg', '-i', video_url, '-ss', '00:00:01', '-vframes', '1',
-                '-q:v', '2', '-f', 'image2', temp_path, '-y'
+                'ffmpeg', '-loglevel', 'error', '-i', video_url, '-ss', '00:00:01',
+                '-vframes', '1', '-q:v', '2', '-f', 'image2', temp_path, '-y'
             ]
 
             result = subprocess.run(cmd, capture_output=True, timeout=15)
 
             if result.returncode == 0:
-                # Read the generated thumbnail
-                with open(temp_path, 'rb') as f:
-                    thumbnail_data = f.read()
+                # Check if file was actually created
+                if os.path.exists(temp_path) and os.path.getsize(temp_path) > 0:
+                    # Read the generated thumbnail
+                    with open(temp_path, 'rb') as f:
+                        thumbnail_data = f.read()
 
-                # Clean up temp file
-                os.unlink(temp_path)
+                    # Clean up temp file
+                    os.unlink(temp_path)
 
-                # Return thumbnail as response
-                response = make_response(thumbnail_data)
-                response.headers['Content-Type'] = 'image/jpeg'
-                response.headers['Access-Control-Allow-Origin'] = '*'
-                response.headers['Cache-Control'] = 'public, max-age=3600'  # Cache for 1 hour
-                return response
+                    # Return thumbnail as response
+                    response = make_response(thumbnail_data)
+                    response.headers['Content-Type'] = 'image/jpeg'
+                    response.headers['Access-Control-Allow-Origin'] = '*'
+                    response.headers['Cache-Control'] = 'public, max-age=3600'  # Cache for 1 hour
+                    return response
+                else:
+                    if os.path.exists(temp_path):
+                        os.unlink(temp_path)
+                    return jsonify({'error': 'Failed to extract video frame - no output'}), 500
             else:
                 # Clean up temp file on error
                 if os.path.exists(temp_path):

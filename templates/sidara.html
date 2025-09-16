@@ -88,6 +88,43 @@
             <div class="alert alert-light">
                 <strong>Keyboard Shortcuts:</strong>
                 <kbd>R</kbd> = Real, <kbd>T</kbd> = Test, <kbd>Space</kbd> = Select, <kbd>A</kbd> = Select All Visible, <kbd>C</kbd> = Clear Selection
+                <button id="toggle-debug" class="btn btn-sm btn-outline-info ml-3">Show Debug Info</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Debug Panel (Hidden by default) -->
+    <div class="row mb-3" id="debug-panel" style="display: none;">
+        <div class="col-12">
+            <div class="card border-info">
+                <div class="card-header bg-info text-white">
+                    <h6 class="mb-0"><i class="fas fa-bug"></i> Thumbnail Loading Debug Information</h6>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <h6>Loading Statistics</h6>
+                            <ul class="list-unstyled">
+                                <li><strong>Total Videos:</strong> <span id="debug-total-videos">0</span></li>
+                                <li><strong>Successful Loads:</strong> <span id="debug-successful-loads">0</span></li>
+                                <li><strong>Failed Loads:</strong> <span id="debug-failed-loads">0</span></li>
+                                <li><strong>Retry Attempts:</strong> <span id="debug-retry-attempts">0</span></li>
+                            </ul>
+                        </div>
+                        <div class="col-md-6">
+                            <h6>Recent Events</h6>
+                            <div id="debug-events" style="height: 150px; overflow-y: auto; background: #f8f9fa; padding: 0.5rem; border-radius: 0.25rem; font-family: monospace; font-size: 0.8rem;">
+                                <!-- Debug events will be logged here -->
+                            </div>
+                        </div>
+                    </div>
+                    <div class="row mt-3">
+                        <div class="col-12">
+                            <button id="clear-debug-log" class="btn btn-sm btn-outline-secondary">Clear Log</button>
+                            <button id="test-thumbnail-errors" class="btn btn-sm btn-outline-warning">Test Error Handling</button>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -255,6 +292,112 @@ kbd {
     background-color: #212529;
     border-radius: 0.2rem;
 }
+
+/* Enhanced thumbnail loading and error states */
+.thumbnail-loading {
+    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+    border: 2px dashed #dee2e6;
+    transition: all 0.3s ease;
+    flex-direction: column;
+}
+
+.thumbnail-loading .spinner-border {
+    width: 2rem;
+    height: 2rem;
+    margin-bottom: 0.5rem;
+}
+
+.thumbnail-loading span {
+    font-size: 0.875rem;
+    color: #6c757d;
+    font-weight: 500;
+}
+
+.thumbnail-error {
+    background: linear-gradient(135deg, #f8f9fa 0%, #fff3cd 100%);
+    border: 2px dashed #ffeaa7;
+    transition: all 0.3s ease;
+    flex-direction: column;
+    text-align: center;
+    padding: 1rem;
+}
+
+.thumbnail-error i {
+    color: #856404 !important;
+    margin-bottom: 0.5rem;
+}
+
+.thumbnail-error span {
+    color: #856404;
+    font-weight: 500;
+    margin-bottom: 0.5rem;
+}
+
+.thumbnail-error .retry-button {
+    margin-top: 0.5rem;
+    border-color: #6c757d;
+    color: #6c757d;
+    font-size: 0.75rem;
+    padding: 0.25rem 0.5rem;
+    transition: all 0.2s ease;
+}
+
+.thumbnail-error .retry-button:hover {
+    background-color: #6c757d;
+    color: white;
+    transform: translateY(-1px);
+}
+
+.thumbnail-error .retry-button:focus {
+    box-shadow: 0 0 0 0.2rem rgba(108, 117, 125, 0.25);
+}
+
+/* Loading state animation */
+.thumbnail-loading {
+    animation: pulse-bg 2s infinite;
+}
+
+@keyframes pulse-bg {
+    0%, 100% {
+        background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+    }
+    50% {
+        background: linear-gradient(135deg, #e9ecef 0%, #dee2e6 100%);
+    }
+}
+
+/* Improved video card states */
+.video-card .video-thumbnail-wrapper {
+    border-radius: 0.375rem;
+    overflow: hidden;
+}
+
+.video-card:hover .thumbnail-loading,
+.video-card:hover .thumbnail-error {
+    border-color: #007bff;
+    transform: translateY(-1px);
+}
+
+/* Error state variants */
+.thumbnail-error.timeout-error {
+    background: linear-gradient(135deg, #f8f9fa 0%, #f5c6cb 100%);
+    border-color: #f1aeb5;
+}
+
+.thumbnail-error.timeout-error i,
+.thumbnail-error.timeout-error span {
+    color: #721c24 !important;
+}
+
+.thumbnail-error.load-error {
+    background: linear-gradient(135deg, #f8f9fa 0%, #d1ecf1 100%);
+    border-color: #bee5eb;
+}
+
+.thumbnail-error.load-error i,
+.thumbnail-error.load-error span {
+    color: #0c5460 !important;
+}
 </style>
 
 <script>
@@ -265,12 +408,23 @@ let allVideos = [];
 let currentOffset = {{ data.displayed_videos if data else 0 }};
 const devices = {{ data.devices | tojson if data and data.devices else '[]' }};
 
+// Debug tracking
+const debugStats = {
+    totalVideos: 0,
+    successfulLoads: 0,
+    failedLoads: 0,
+    retryAttempts: 0
+};
+
+const debugLog = [];
+
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', function() {
     initializeVideoCategorization();
     setupKeyboardShortcuts();
     setupBatchActions();
     loadVideoData();
+    setupDebugPanel();
 });
 
 function initializeVideoCategorization() {
@@ -467,15 +621,66 @@ function initializeNewVideos() {
     // Set up lazy loading for new thumbnails
     const newCanvases = document.querySelectorAll('.video-thumbnail-canvas:not([data-processed])');
     newCanvases.forEach(canvas => {
-        if (typeof observer !== 'undefined') {
-            observer.observe(canvas);
+        // Use global observer if available
+        if (window.thumbnailObserver) {
+            window.thumbnailObserver.observe(canvas);
+        } else {
+            // Fallback: process immediately if observer is not available
+            const videoUrl = canvas.dataset.videoUrl;
+            if (videoUrl) {
+                canvas.dataset.processed = 'true';
+                extractVideoThumbnailWithRetry(canvas);
+            }
         }
     });
 
-    // Apply existing categorizations
-    Object.keys(categorizedVideos).forEach(videoId => {
-        updateVideoUI(videoId, categorizedVideos[videoId]);
+    // Re-initialize event handlers for categorization buttons
+    document.querySelectorAll('.categorize-btn:not([data-initialized])').forEach(btn => {
+        btn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            const videoId = this.dataset.videoId;
+            const category = this.dataset.category;
+            categorizeVideo(videoId, category);
+        });
+        btn.dataset.initialized = 'true';
     });
+
+    // Apply existing categorizations to new videos
+    Object.keys(categorizedVideos).forEach(videoId => {
+        const videoItem = document.querySelector(`[data-video-id="${videoId}"]`);
+        if (videoItem) {
+            const category = categorizedVideos[videoId];
+            updateVideoDisplayForItem(videoItem, category);
+        }
+    });
+}
+
+// Helper function to update a single video item's display
+function updateVideoDisplayForItem(videoItem, category) {
+    const card = videoItem.querySelector('.video-card');
+    const statusBadge = videoItem.querySelector('.categorization-status .badge');
+    const buttons = videoItem.querySelectorAll('.categorize-btn');
+
+    if (!card || !statusBadge) return;
+
+    // Reset classes
+    card.classList.remove('categorized-real', 'categorized-test');
+    buttons.forEach(btn => btn.classList.remove('active'));
+
+    if (category) {
+        card.classList.add(`categorized-${category}`);
+        statusBadge.textContent = category.charAt(0).toUpperCase() + category.slice(1);
+        statusBadge.className = `badge badge-${category === 'real' ? 'success' : 'warning'}`;
+
+        // Activate the appropriate button
+        const activeButton = videoItem.querySelector(`[data-category="${category}"]`);
+        if (activeButton) {
+            activeButton.classList.add('active');
+        }
+    } else {
+        statusBadge.textContent = 'Uncategorized';
+        statusBadge.className = 'badge badge-light';
+    }
 }
 
 function updateStatistics() {
@@ -676,50 +881,105 @@ function clearAllData() {
     }
 }
 
-// Load video thumbnails using client-side extraction
+// Enhanced video thumbnail loading with error handling
 document.addEventListener('DOMContentLoaded', function() {
-    const observer = new IntersectionObserver((entries) => {
+    // Create global observer for thumbnail loading
+    window.thumbnailObserver = new IntersectionObserver((entries) => {
         entries.forEach(entry => {
             if (entry.isIntersecting) {
                 const canvas = entry.target;
                 const videoUrl = canvas.dataset.videoUrl;
                 if (videoUrl && !canvas.dataset.processed) {
                     canvas.dataset.processed = 'true';
-                    extractVideoThumbnail(canvas);
+                    extractVideoThumbnailWithRetry(canvas);
                 }
             }
         });
+    }, {
+        // Trigger when 10% of the element is visible
+        threshold: 0.1,
+        // Load thumbnails slightly before they come into view
+        rootMargin: '50px'
     });
 
+    // Observe all initial canvas elements
     document.querySelectorAll('.video-thumbnail-canvas').forEach(canvas => {
-        observer.observe(canvas);
+        window.thumbnailObserver.observe(canvas);
     });
 });
 
-function extractVideoThumbnail(canvas) {
+// Enhanced thumbnail extraction with retry and better error handling
+function extractVideoThumbnailWithRetry(canvas, attempt = 1, maxAttempts = 3) {
     const videoUrl = canvas.dataset.videoUrl;
     const wrapper = canvas.closest('.video-thumbnail-wrapper');
+    const videoId = canvas.closest('.video-item')?.dataset.videoId || 'unknown';
+
+    if (!wrapper) {
+        console.error('Video thumbnail wrapper not found for canvas');
+        return;
+    }
+
     const loadingDiv = wrapper.querySelector('.thumbnail-loading');
     const fallbackImg = wrapper.querySelector('.video-thumbnail-fallback');
     const errorDiv = wrapper.querySelector('.thumbnail-error');
+
+    // Update loading state with attempt information
+    updateLoadingState(loadingDiv, attempt, maxAttempts);
+
+    // Log attempt for debugging
+    if (attempt === 1) {
+        logThumbnailEvent(videoId, 'extraction_start', { url: videoUrl });
+    } else {
+        logThumbnailEvent(videoId, 'retry_attempt', { attempt, maxAttempts });
+    }
+
+    // Calculate timeout with exponential backoff
+    const baseTimeout = 5000;
+    const timeout = baseTimeout * Math.pow(1.5, attempt - 1);
+
+    extractVideoThumbnail(canvas, videoUrl, wrapper, loadingDiv, fallbackImg, errorDiv, attempt, maxAttempts, timeout);
+}
+
+function extractVideoThumbnail(canvas, videoUrl, wrapper, loadingDiv, fallbackImg, errorDiv, attempt, maxAttempts, timeout) {
+    const videoId = canvas.closest('.video-item')?.dataset.videoId || 'unknown';
 
     // Create a hidden video element for frame extraction
     const video = document.createElement('video');
     video.crossOrigin = 'anonymous';
     video.muted = true;
     video.style.display = 'none';
+    video.preload = 'metadata';
 
     let thumbnailExtracted = false;
+    let timeoutId;
+    let retryTimeoutId;
 
-    // Setup video event handlers
+    // Enhanced error tracking
+    const errorTracker = {
+        videoLoadError: false,
+        canvasError: false,
+        serverFallbackError: false,
+        timeoutError: false
+    };
+
+    // Cleanup function
+    function cleanup() {
+        if (timeoutId) clearTimeout(timeoutId);
+        if (retryTimeoutId) clearTimeout(retryTimeoutId);
+        if (video.parentNode) video.remove();
+    }
+
+    // Setup video event handlers with enhanced error handling
     video.addEventListener('loadeddata', function() {
         if (thumbnailExtracted) return;
 
         try {
-            // Set video time to 1 second to get a better frame
-            this.currentTime = Math.min(1, this.duration * 0.1);
+            // Set video time to get a representative frame
+            const seekTime = Math.min(1, this.duration * 0.1);
+            this.currentTime = seekTime;
+            console.log(`Video loaded for ${videoId}, seeking to ${seekTime}s`);
         } catch (e) {
-            console.warn('Could not set video time:', e);
+            console.warn(`Could not set video time for ${videoId}:`, e);
             extractFrame();
         }
     });
@@ -729,12 +989,23 @@ function extractVideoThumbnail(canvas) {
     video.addEventListener('canplay', function() {
         if (thumbnailExtracted) return;
         // Fallback if seeked event doesn't fire
-        setTimeout(extractFrame, 100);
+        setTimeout(extractFrame, 200);
     });
 
     video.addEventListener('error', function(e) {
-        console.warn('Video load error, trying server fallback:', e);
-        tryServerFallback();
+        errorTracker.videoLoadError = true;
+        const errorCode = this.error?.code || 'unknown';
+        const errorMessage = this.error?.message || 'Unknown video error';
+        console.warn(`Video load error for ${videoId} (code: ${errorCode}):`, errorMessage);
+        handleThumbnailFailure('video_load');
+    });
+
+    video.addEventListener('loadstart', function() {
+        console.log(`Video load started for ${videoId}`);
+    });
+
+    video.addEventListener('stalled', function() {
+        console.warn(`Video loading stalled for ${videoId}`);
     });
 
     function extractFrame() {
@@ -742,64 +1013,444 @@ function extractVideoThumbnail(canvas) {
         thumbnailExtracted = true;
 
         try {
+            // Validate video dimensions
+            const width = video.videoWidth || 640;
+            const height = video.videoHeight || 360;
+
+            if (width === 0 || height === 0) {
+                throw new Error('Invalid video dimensions');
+            }
+
             // Set canvas size to video dimensions
-            canvas.width = video.videoWidth || 640;
-            canvas.height = video.videoHeight || 360;
+            canvas.width = width;
+            canvas.height = height;
 
             // Draw video frame to canvas
             const ctx = canvas.getContext('2d');
-            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            ctx.drawImage(video, 0, 0, width, height);
 
-            // Show canvas and hide loading
-            loadingDiv.style.display = 'none';
-            canvas.style.display = 'block';
+            // Test if canvas has actual content (not just black)
+            const imageData = ctx.getImageData(0, 0, Math.min(width, 100), Math.min(height, 100));
+            const hasContent = imageData.data.some((value, index) => index % 4 < 3 && value > 10);
 
-            // Clean up video element
-            video.remove();
+            if (!hasContent) {
+                console.warn(`Canvas appears empty for ${videoId}, trying server fallback`);
+                tryServerFallback();
+                return;
+            }
+
+            // Success! Show thumbnail
+            showThumbnailSuccess(loadingDiv, canvas);
+            cleanup();
+            logThumbnailEvent(videoId, 'thumbnail_success', { method: 'canvas', width, height });
 
         } catch (e) {
-            console.warn('Canvas extraction failed, trying server fallback:', e);
+            errorTracker.canvasError = true;
+            logThumbnailEvent(videoId, 'canvas_error', { error: e.message, level: 'warn' });
             tryServerFallback();
         }
     }
 
     function tryServerFallback() {
         if (thumbnailExtracted) return;
-        thumbnailExtracted = true;
 
-        // Try server-side frame extraction
-        const frameUrl = `/video_frame_proxy?url=${encodeURIComponent(videoUrl)}`;
+        logThumbnailEvent(videoId, 'server_fallback_attempt', { attempt });
+        updateLoadingState(loadingDiv, attempt, maxAttempts, 'Trying server fallback...');
 
-        fallbackImg.onload = function() {
-            loadingDiv.style.display = 'none';
-            fallbackImg.style.display = 'block';
-            video.remove();
-        };
+        // Try server-side frame extraction using fetch POST to avoid URL truncation
+        fetch('/video_frame_proxy', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                url: videoUrl
+            })
+        })
+        .then(response => {
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+            return response.blob();
+        })
+        .then(blob => {
+            if (thumbnailExtracted) return;
+            thumbnailExtracted = true;
 
-        fallbackImg.onerror = function() {
-            // Final fallback - show error placeholder
-            loadingDiv.style.display = 'none';
-            errorDiv.style.display = 'flex';
-            video.remove();
-        };
-
-        fallbackImg.src = frameUrl;
+            // Create object URL from blob and set as image source
+            const objectUrl = URL.createObjectURL(blob);
+            fallbackImg.onload = function() {
+                URL.revokeObjectURL(objectUrl); // Clean up object URL
+                showThumbnailSuccess(loadingDiv, null, fallbackImg);
+                cleanup();
+                logThumbnailEvent(videoId, 'thumbnail_success', { method: 'server_fallback' });
+            };
+            fallbackImg.src = objectUrl;
+        })
+        .catch(error => {
+            errorTracker.serverFallbackError = true;
+            logThumbnailEvent(videoId, 'server_fallback_error', { level: 'warn', error: error.message });
+            handleThumbnailFailure('server_fallback');
+        });
     }
+
+    function handleThumbnailFailure(failureType) {
+        if (thumbnailExtracted) return;
+
+        // If we haven't reached max attempts, retry with exponential backoff
+        if (attempt < maxAttempts) {
+            const retryDelay = Math.min(1000 * Math.pow(2, attempt - 1), 5000); // Cap at 5 seconds
+            console.log(`Scheduling retry for ${videoId} in ${retryDelay}ms (failure type: ${failureType})`);
+
+            updateLoadingState(loadingDiv, attempt, maxAttempts, `Retrying in ${Math.ceil(retryDelay/1000)}s...`);
+
+            retryTimeoutId = setTimeout(() => {
+                cleanup();
+                extractVideoThumbnailWithRetry(canvas, attempt + 1, maxAttempts);
+            }, retryDelay);
+
+        } else {
+            // Final failure - show error state
+            thumbnailExtracted = true;
+            logThumbnailEvent(videoId, 'thumbnail_final_failure', { errorTracker, level: 'error' });
+            showThumbnailError(loadingDiv, errorDiv, errorTracker, videoId);
+            cleanup();
+        }
+    }
+
+    // Add timeout to prevent hanging
+    timeoutId = setTimeout(() => {
+        if (!thumbnailExtracted) {
+            errorTracker.timeoutError = true;
+            console.warn(`Thumbnail extraction timeout for ${videoId} after ${timeout}ms`);
+            handleThumbnailFailure('timeout');
+        }
+    }, timeout);
 
     // Add video to DOM and start loading (hidden)
     document.body.appendChild(video);
 
-    // Add timeout to prevent hanging
-    setTimeout(() => {
-        if (!thumbnailExtracted) {
-            console.warn('Thumbnail extraction timeout, using server fallback');
-            tryServerFallback();
-        }
-    }, 5000);
-
     // Start video loading
-    video.src = videoUrl;
-    video.load();
+    try {
+        video.src = videoUrl;
+        video.load();
+    } catch (e) {
+        console.error(`Failed to start video loading for ${videoId}:`, e);
+        handleThumbnailFailure('load_start');
+    }
+}
+
+// Helper functions for UI updates
+function updateLoadingState(loadingDiv, attempt, maxAttempts, customMessage = null) {
+    if (!loadingDiv) return;
+
+    const spinner = loadingDiv.querySelector('.spinner-border');
+    const text = loadingDiv.querySelector('span:not(.sr-only)');
+
+    if (text) {
+        if (customMessage) {
+            text.textContent = customMessage;
+        } else if (attempt > 1) {
+            text.textContent = `Loading thumbnail... (attempt ${attempt}/${maxAttempts})`;
+        } else {
+            text.textContent = 'Loading thumbnail...';
+        }
+    }
+
+    // Show loading state
+    loadingDiv.style.display = 'flex';
+}
+
+function showThumbnailSuccess(loadingDiv, canvas = null, fallbackImg = null) {
+    if (loadingDiv) loadingDiv.style.display = 'none';
+    if (canvas) canvas.style.display = 'block';
+    if (fallbackImg) fallbackImg.style.display = 'block';
+}
+
+function showThumbnailError(loadingDiv, errorDiv, errorTracker, videoId) {
+    if (loadingDiv) loadingDiv.style.display = 'none';
+
+    if (errorDiv) {
+        // Reset error div classes
+        errorDiv.className = 'thumbnail-error bg-light d-flex align-items-center justify-content-center flex-column';
+        errorDiv.style.width = '100%';
+        errorDiv.style.height = '100%';
+        errorDiv.style.position = 'absolute';
+        errorDiv.style.top = '0';
+        errorDiv.style.left = '0';
+
+        // Update error message and styling based on what went wrong
+        let errorMessage = 'Video temporarily unavailable';
+        let errorIcon = 'fas fa-video';
+        let errorClass = '';
+
+        if (errorTracker.videoLoadError) {
+            errorMessage = 'Cannot load video';
+            errorIcon = 'fas fa-exclamation-triangle';
+            errorClass = 'load-error';
+        } else if (errorTracker.serverFallbackError) {
+            errorMessage = 'Preview unavailable';
+            errorIcon = 'fas fa-eye-slash';
+        } else if (errorTracker.timeoutError) {
+            errorMessage = 'Loading timeout';
+            errorIcon = 'fas fa-clock';
+            errorClass = 'timeout-error';
+        } else if (errorTracker.canvasError) {
+            errorMessage = 'Thumbnail generation failed';
+            errorIcon = 'fas fa-image';
+        }
+
+        // Add error-specific class
+        if (errorClass) {
+            errorDiv.classList.add(errorClass);
+        }
+
+        // Update error display
+        const iconElement = errorDiv.querySelector('i');
+        const messageElement = errorDiv.querySelector('span:not(.retry-button span)');
+
+        if (iconElement) {
+            iconElement.className = `${errorIcon} mb-2`;
+            iconElement.style.fontSize = '2rem';
+        }
+
+        if (messageElement) {
+            messageElement.textContent = errorMessage;
+        }
+
+        // Add duration info if available
+        const durationElement = errorDiv.querySelector('small');
+        if (durationElement) {
+            const videoItem = document.querySelector(`[data-video-id="${videoId}"]`);
+            const duration = videoItem?.dataset.duration;
+            if (duration) {
+                durationElement.textContent = `${duration}s`;
+                durationElement.style.opacity = '0.7';
+            }
+        }
+
+        // Add retry button for user-initiated retry
+        addRetryButton(errorDiv, videoId);
+
+        errorDiv.style.display = 'flex';
+    }
+
+    console.log(`Final thumbnail failure for ${videoId}:`, errorTracker);
+}
+
+function addRetryButton(errorDiv, videoId) {
+    // Remove existing retry button if present
+    const existingRetry = errorDiv.querySelector('.retry-button');
+    if (existingRetry) {
+        existingRetry.remove();
+    }
+
+    // Create retry button
+    const retryButton = document.createElement('button');
+    retryButton.className = 'btn btn-sm btn-outline-primary mt-2 retry-button';
+    retryButton.innerHTML = '<i class="fas fa-redo"></i> Retry';
+    retryButton.onclick = function(e) {
+        e.stopPropagation();
+        retryThumbnailExtraction(videoId);
+    };
+
+    errorDiv.appendChild(retryButton);
+}
+
+function retryThumbnailExtraction(videoId) {
+    const videoItem = document.querySelector(`[data-video-id="${videoId}"]`);
+    if (!videoItem) return;
+
+    const canvas = videoItem.querySelector('.video-thumbnail-canvas');
+    if (!canvas) return;
+
+    // Reset processing state and retry
+    canvas.dataset.processed = 'false';
+
+    // Hide error state and show loading
+    const wrapper = canvas.closest('.video-thumbnail-wrapper');
+    if (wrapper) {
+        const errorDiv = wrapper.querySelector('.thumbnail-error');
+        const loadingDiv = wrapper.querySelector('.thumbnail-loading');
+
+        if (errorDiv) errorDiv.style.display = 'none';
+        if (loadingDiv) loadingDiv.style.display = 'flex';
+    }
+
+    console.log(`User-initiated retry for video ${videoId}`);
+
+    // Start fresh extraction
+    setTimeout(() => {
+        extractVideoThumbnailWithRetry(canvas);
+    }, 100);
+}
+
+// Debug and logging functions
+function setupDebugPanel() {
+    const toggleButton = document.getElementById('toggle-debug');
+    const debugPanel = document.getElementById('debug-panel');
+    const clearLogButton = document.getElementById('clear-debug-log');
+    const testErrorsButton = document.getElementById('test-thumbnail-errors');
+
+    // Initialize debug stats
+    updateDebugStats();
+
+    // Toggle debug panel visibility
+    toggleButton.addEventListener('click', function() {
+        const isVisible = debugPanel.style.display !== 'none';
+        debugPanel.style.display = isVisible ? 'none' : 'block';
+        toggleButton.textContent = isVisible ? 'Show Debug Info' : 'Hide Debug Info';
+
+        if (!isVisible) {
+            updateDebugStats();
+            updateDebugLog();
+        }
+    });
+
+    // Clear debug log
+    clearLogButton.addEventListener('click', function() {
+        debugLog.length = 0;
+        updateDebugLog();
+        addDebugEvent('Debug log cleared by user');
+    });
+
+    // Test error handling
+    testErrorsButton.addEventListener('click', function() {
+        testThumbnailErrorHandling();
+    });
+
+    addDebugEvent('Debug panel initialized');
+}
+
+function addDebugEvent(message, level = 'info') {
+    const timestamp = new Date().toLocaleTimeString();
+    const logEntry = {
+        timestamp,
+        message,
+        level
+    };
+
+    debugLog.push(logEntry);
+
+    // Keep only last 50 entries
+    if (debugLog.length > 50) {
+        debugLog.shift();
+    }
+
+    // Update debug panel if visible
+    const debugPanel = document.getElementById('debug-panel');
+    if (debugPanel && debugPanel.style.display !== 'none') {
+        updateDebugLog();
+    }
+
+    // Also log to console with appropriate level
+    const consoleMethod = console[level] || console.log;
+    consoleMethod(`[Sidara Debug] ${message}`);
+}
+
+function updateDebugStats() {
+    // Count current video states
+    const totalVideos = document.querySelectorAll('.video-item').length;
+    const successfulThumbnails = document.querySelectorAll('.video-thumbnail-canvas[style*="display: block"]').length;
+    const errorThumbnails = document.querySelectorAll('.thumbnail-error[style*="display: flex"]').length;
+
+    debugStats.totalVideos = totalVideos;
+    debugStats.successfulLoads = successfulThumbnails;
+    debugStats.failedLoads = errorThumbnails;
+
+    // Update UI
+    document.getElementById('debug-total-videos').textContent = debugStats.totalVideos;
+    document.getElementById('debug-successful-loads').textContent = debugStats.successfulLoads;
+    document.getElementById('debug-failed-loads').textContent = debugStats.failedLoads;
+    document.getElementById('debug-retry-attempts').textContent = debugStats.retryAttempts;
+}
+
+function updateDebugLog() {
+    const debugEventsDiv = document.getElementById('debug-events');
+    if (!debugEventsDiv) return;
+
+    const eventsHtml = debugLog.slice(-20).reverse().map(entry => {
+        const levelClass = entry.level === 'error' ? 'text-danger' :
+                          entry.level === 'warn' ? 'text-warning' : 'text-muted';
+        return `<div class="${levelClass}">[${entry.timestamp}] ${entry.message}</div>`;
+    }).join('');
+
+    debugEventsDiv.innerHTML = eventsHtml || '<div class="text-muted">No events logged yet</div>';
+
+    // Auto-scroll to top (since we reverse the order)
+    debugEventsDiv.scrollTop = 0;
+}
+
+function testThumbnailErrorHandling() {
+    addDebugEvent('Starting error handling test...', 'info');
+
+    // Find a video item to test with
+    const videoItems = document.querySelectorAll('.video-item');
+    if (videoItems.length === 0) {
+        addDebugEvent('No video items found for testing', 'warn');
+        return;
+    }
+
+    const testVideoItem = videoItems[0];
+    const canvas = testVideoItem.querySelector('.video-thumbnail-canvas');
+    if (!canvas) {
+        addDebugEvent('No canvas found in test video item', 'warn');
+        return;
+    }
+
+    // Create a test canvas with a bad URL
+    const testCanvas = canvas.cloneNode(true);
+    testCanvas.dataset.videoUrl = 'https://invalid-url-for-testing.com/nonexistent.mp4';
+    testCanvas.dataset.processed = 'false';
+
+    // Replace the canvas temporarily
+    const wrapper = canvas.closest('.video-thumbnail-wrapper');
+    if (wrapper) {
+        const originalCanvas = wrapper.querySelector('.video-thumbnail-canvas');
+        originalCanvas.style.display = 'none';
+
+        addDebugEvent('Injecting test error scenario...', 'info');
+
+        // Test the error handling
+        setTimeout(() => {
+            extractVideoThumbnailWithRetry(testCanvas);
+        }, 100);
+
+        // Restore original after 30 seconds
+        setTimeout(() => {
+            originalCanvas.style.display = 'block';
+            if (testCanvas.parentNode) {
+                testCanvas.remove();
+            }
+            addDebugEvent('Test completed, original canvas restored', 'info');
+        }, 30000);
+    }
+}
+
+// Enhanced logging for thumbnail functions
+function logThumbnailEvent(videoId, event, details = {}) {
+    const message = `Video ${videoId}: ${event}` +
+                   (Object.keys(details).length > 0 ? ` (${JSON.stringify(details)})` : '');
+    addDebugEvent(message, details.level || 'info');
+
+    // Update stats based on event
+    switch (event) {
+        case 'retry_attempt':
+            debugStats.retryAttempts++;
+            break;
+        case 'thumbnail_success':
+            debugStats.successfulLoads++;
+            break;
+        case 'thumbnail_final_failure':
+            debugStats.failedLoads++;
+            break;
+    }
+
+    // Update debug panel if visible
+    const debugPanel = document.getElementById('debug-panel');
+    if (debugPanel && debugPanel.style.display !== 'none') {
+        updateDebugStats();
+    }
 }
 </script>
 {% endblock %}
