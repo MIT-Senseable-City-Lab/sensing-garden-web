@@ -1,9 +1,11 @@
 import io
 import json
 import os
+import re
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+import boto3
 from dotenv import load_dotenv
 from flask import (Flask, jsonify, make_response, redirect, render_template,
                   request, url_for)
@@ -23,6 +25,65 @@ client = SensingGardenClient(
     aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY'),
     aws_region=os.getenv('AWS_REGION')
 )
+
+# Create S3 client for generating presigned URLs locally
+s3_client = boto3.client(
+    's3',
+    aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'),
+    aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY'),
+    region_name=os.getenv('AWS_REGION')
+)
+
+def fix_presigned_url(broken_url: str) -> str:
+    """
+    Fix broken presigned URLs by regenerating them with local credentials.
+
+    Args:
+        broken_url: The broken presigned URL from the backend
+
+    Returns:
+        A working presigned URL generated with local credentials
+    """
+    if not broken_url:
+        return broken_url
+
+    try:
+        # Extract S3 bucket and key from the broken URL
+        # URLs have format: https://bucket-name.s3.amazonaws.com/key?params
+        match = re.search(r'https://([^.]+)\.s3\.amazonaws\.com/(.+?)\?', broken_url)
+        if not match:
+            # Fallback pattern for different URL formats
+            match = re.search(r'amazonaws\.com/(.+?)\?', broken_url)
+            if match:
+                s3_key = match.group(1)
+                # Determine bucket based on the key pattern
+                if s3_key.startswith('videos/'):
+                    bucket_name = 'scl-sensing-garden-videos'
+                elif s3_key.startswith('classification/') or s3_key.startswith('detection/'):
+                    bucket_name = 'scl-sensing-garden-images'
+                else:
+                    print(f"Could not determine bucket for key: {s3_key}")
+                    return broken_url
+            else:
+                print(f"Could not parse URL: {broken_url}")
+                return broken_url
+        else:
+            bucket_name = match.group(1)
+            s3_key = match.group(2)
+
+        # Generate a new presigned URL with local credentials
+        working_url = s3_client.generate_presigned_url(
+            'get_object',
+            Params={'Bucket': bucket_name, 'Key': s3_key},
+            ExpiresIn=3600  # 1 hour expiration
+        )
+
+        print(f"Fixed presigned URL: {broken_url[:100]}... -> {working_url[:100]}...")
+        return working_url
+
+    except Exception as e:
+        print(f"Error fixing presigned URL {broken_url}: {e}")
+        return broken_url
 
 def fetch_data(
     table_type: str,
@@ -78,7 +139,7 @@ def fetch_data(
         items = response.get('items', [])
         next_token = response.get('next_token', None)
         
-        # Add formatted timestamp to each item
+        # Add formatted timestamp and fix video URLs
         for item in items:
             if 'timestamp' in item:
                 try:
@@ -89,6 +150,12 @@ def fetch_data(
                 except (ValueError, TypeError) as e:
                     print(f"Error formatting timestamp {item.get('timestamp')}: {str(e)}")
                     item['formatted_time'] = item.get('timestamp', '')
+
+            # Fix broken presigned URLs for videos and images
+            if 'video_url' in item and item['video_url']:
+                item['video_url'] = fix_presigned_url(item['video_url'])
+            if 'image_url' in item and item['image_url']:
+                item['image_url'] = fix_presigned_url(item['image_url'])
         
         return {'items': items, 'next_token': next_token}
     except Exception as e:
@@ -559,15 +626,19 @@ def sidara_load_more_videos():
         processed_videos = []
 
         for video in device_videos:
+            # Fix video URLs before processing
+            video_url = fix_presigned_url(video.get('video_url', ''))
+            thumbnail_url = fix_presigned_url(video.get('thumbnail_url', '') or video.get('video_url', ''))
+
             video_entry = {
                 'device_id': device_id,
                 'video_id': f"{device_id}_{video.get('timestamp', 'unknown')}",
-                'video_url': video.get('video_url'),
+                'video_url': video_url,
                 'timestamp': video.get('timestamp'),
                 'formatted_time': video.get('formatted_time'),
                 'duration': video.get('duration', 0),
                 'metadata': video.get('metadata', {}),
-                'thumbnail_url': video.get('thumbnail_url') or video.get('video_url')
+                'thumbnail_url': thumbnail_url
             }
             processed_videos.append(video_entry)
 
@@ -1004,6 +1075,7 @@ def apply_false_positive_filtering(classifications, confidence_threshold=0.05, s
 @app.route('/sidara')
 def sidara_analysis():
     """Interactive video categorization interface for Sidara devices"""
+    print("=== SIDARA ROUTE ACCESSED ===", flush=True)
     try:
         # Initialize video data structure
         video_data = {
@@ -1014,12 +1086,12 @@ def sidara_analysis():
 
         # Fetch video data from all three Sidara devices
         for device_id in SIDARA_DEVICES:
-            print(f"Fetching videos for device: {device_id}")
+            print(f"Fetching videos for device: {device_id}", flush=True)
 
             try:
                 # Get video count for this device
                 videos_count = client.videos.count(device_id=device_id)
-                print(f"Device {device_id} has {videos_count} videos")
+                print(f"Device {device_id} has {videos_count} videos", flush=True)
 
                 if videos_count > 0:
                     # Fetch only first batch of videos for faster initial load
@@ -1031,27 +1103,31 @@ def sidara_analysis():
                     )
 
                     device_videos = videos_response.get('items', [])
-                    print(f"Retrieved {len(device_videos)} videos for device {device_id}")
+                    print(f"Retrieved {len(device_videos)} videos for device {device_id}", flush=True)
 
                     # Process each video and add device info
                     for video in device_videos:
+                        # Fix video URLs before processing
+                        video_url = fix_presigned_url(video.get('video_url', ''))
+                        thumbnail_url = fix_presigned_url(video.get('thumbnail_url', '') or video.get('video_url', ''))
+
                         video_entry = {
                             'device_id': device_id,
                             'video_id': f"{device_id}_{video.get('timestamp', 'unknown')}",
-                            'video_url': video.get('video_url'),
+                            'video_url': video_url,
                             'timestamp': video.get('timestamp'),
                             'formatted_time': video.get('formatted_time'),
                             'duration': video.get('duration', 0),  # Duration in seconds if available
                             'metadata': video.get('metadata', {}),
                             # We'll extract these in the frontend from video_url for thumbnails
-                            'thumbnail_url': video.get('thumbnail_url') or video.get('video_url')
+                            'thumbnail_url': thumbnail_url
                         }
                         video_data['videos'].append(video_entry)
 
                 video_data['total_videos'] += videos_count
 
             except Exception as e:
-                print(f"Error fetching videos for device {device_id}: {str(e)}")
+                print(f"Error fetching videos for device {device_id}: {str(e)}", flush=True)
                 continue
 
         # Sort all videos by timestamp (newest first)
@@ -1061,12 +1137,12 @@ def sidara_analysis():
         video_data['displayed_videos'] = len(video_data['videos'])
         video_data['initial_batch_size'] = 30
 
-        print(f"Sidara video categorization ready: {len(video_data['videos'])} videos loaded (of {video_data['total_videos']} total) from {len(SIDARA_DEVICES)} devices")
+        print(f"Sidara video categorization ready: {len(video_data['videos'])} videos loaded (of {video_data['total_videos']} total) from {len(SIDARA_DEVICES)} devices", flush=True)
 
         return render_template('sidara.html', data=video_data)
 
     except Exception as e:
-        print(f"Error in Sidara video interface: {str(e)}")
+        print(f"Error in Sidara video interface: {str(e)}", flush=True)
         import traceback
         traceback.print_exc()
         return render_template('error.html', error=str(e))
@@ -1123,7 +1199,7 @@ def species_detail(species_name):
                     # Process each detection
                     for item in species_detections:
                         detection = {
-                            'image_url': item.get('image_url'),
+                            'image_url': fix_presigned_url(item.get('image_url', '')),
                             'timestamp': item.get('timestamp'),
                             'device_id': device_id,
                             'confidence': item.get('species_confidence', item.get('confidence', 0)),
@@ -1258,7 +1334,7 @@ def sidara_filtered_analysis():
             if len(species_summary[species]['recent_images']) < 3:
                 if 'image_url' in item:
                     detection_data = {
-                        'image_url': item.get('image_url'),
+                        'image_url': fix_presigned_url(item.get('image_url', '')),
                         'timestamp': timestamp,
                         'device_id': item.get('device_id', 'unknown'),
                         'confidence': confidence
@@ -1307,6 +1383,13 @@ def sidara_filtered_analysis():
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
+
+@app.route('/debug_thumbnails.html')
+def debug_thumbnails():
+    """Serve the thumbnail debug page"""
+    with open('debug_thumbnails.html', 'r') as f:
+        content = f.read()
+    return content
 
 if __name__ == '__main__':
     # Get port from environment variable or default to 8080
