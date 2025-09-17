@@ -4,6 +4,7 @@ import os
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+import boto3
 from dotenv import load_dotenv
 from flask import (Flask, jsonify, make_response, redirect, render_template,
                   request, url_for)
@@ -14,6 +15,10 @@ from sensing_garden_client import SensingGardenClient
 load_dotenv()
 
 app = Flask(__name__)
+
+# AWS credentials from environment
+AWS_ACCESS_KEY_ID = os.getenv('AWS_ACCESS_KEY_ID')
+AWS_SECRET_ACCESS_KEY = os.getenv('AWS_SECRET_ACCESS_KEY')
 
 # Create client instance
 client = SensingGardenClient(
@@ -558,7 +563,57 @@ def sidara_load_more_videos():
         device_videos = videos_response.get('items', [])
         processed_videos = []
 
+        # Set up S3 client for pre-signed URLs
+        s3_client = boto3.client('s3',
+            aws_access_key_id=AWS_ACCESS_KEY_ID,
+            aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
+            region_name='us-east-1'
+        )
+
         for video in device_videos:
+            # Get thumbnail URL from DynamoDB if available
+            thumbnail_url = video.get('thumbnail_url')
+
+            # Convert direct S3 URLs to pre-signed URLs
+            if thumbnail_url and 's3.amazonaws.com' in thumbnail_url and '?' not in thumbnail_url:
+                # This is a direct S3 URL, convert to pre-signed
+                try:
+                    # Extract S3 key from URL
+                    if 'scl-sensing-garden-videos.s3.amazonaws.com/' in thumbnail_url:
+                        s3_key = thumbnail_url.split('scl-sensing-garden-videos.s3.amazonaws.com/')[1]
+                        thumbnail_url = s3_client.generate_presigned_url(
+                            'get_object',
+                            Params={'Bucket': 'scl-sensing-garden-videos', 'Key': s3_key},
+                            ExpiresIn=3600  # 1 hour expiration
+                        )
+                except Exception as e:
+                    print(f"Error generating pre-signed URL for thumbnail {thumbnail_url}: {e}")
+                    thumbnail_url = None
+            elif not thumbnail_url and video.get('video_url'):
+                # Try to construct thumbnail key from video URL and check if it exists
+                video_url = video.get('video_url')
+                if 'scl-sensing-garden-videos.s3.amazonaws.com' in video_url or video_url.startswith('https://') and 'amazonaws.com' in video_url:
+                    # Extract the video key and create thumbnail key
+                    if 'scl-sensing-garden-videos.s3.amazonaws.com/' in video_url:
+                        video_key = video_url.split('scl-sensing-garden-videos.s3.amazonaws.com/')[1].split('?')[0]  # Remove query params
+                    else:
+                        # Handle pre-signed URLs
+                        video_key = video_url.split('amazonaws.com/')[1].split('?')[0]
+                    thumbnail_key = video_key.replace('.mp4', '_thumbnail.jpg')
+
+                    # Check if thumbnail exists in S3 and generate pre-signed URL
+                    try:
+                        s3_client.head_object(Bucket='scl-sensing-garden-videos', Key=thumbnail_key)
+                        # Thumbnail exists, generate pre-signed URL
+                        thumbnail_url = s3_client.generate_presigned_url(
+                            'get_object',
+                            Params={'Bucket': 'scl-sensing-garden-videos', 'Key': thumbnail_key},
+                            ExpiresIn=3600  # 1 hour expiration
+                        )
+                    except:
+                        # Thumbnail doesn't exist, leave thumbnail_url as None
+                        thumbnail_url = None
+
             video_entry = {
                 'device_id': device_id,
                 'video_id': f"{device_id}_{video.get('timestamp', 'unknown')}",
@@ -567,7 +622,7 @@ def sidara_load_more_videos():
                 'formatted_time': video.get('formatted_time'),
                 'duration': video.get('duration', 0),
                 'metadata': video.get('metadata', {}),
-                'thumbnail_url': video.get('thumbnail_url') or video.get('video_url')
+                'thumbnail_url': thumbnail_url or video.get('video_url')  # Fall back to video URL if no thumbnail
             }
             processed_videos.append(video_entry)
 
@@ -1025,7 +1080,7 @@ def sidara_analysis():
                     # Fetch only first batch of videos for faster initial load
                     videos_response = client.videos.fetch(
                         device_id=device_id,
-                        limit=30,  # Reduced for much faster initial load
+                        limit=100,  # Show 100 videos per page
                         sort_by='timestamp',
                         sort_desc=True
                     )
@@ -1033,8 +1088,58 @@ def sidara_analysis():
                     device_videos = videos_response.get('items', [])
                     print(f"Retrieved {len(device_videos)} videos for device {device_id}")
 
+                    # Set up S3 client for thumbnail pre-signed URLs
+                    s3_client = boto3.client('s3',
+                        aws_access_key_id=AWS_ACCESS_KEY_ID,
+                        aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
+                        region_name='us-east-1'
+                    )
+
                     # Process each video and add device info
                     for video in device_videos:
+                        # Get thumbnail URL from DynamoDB if available
+                        thumbnail_url = video.get('thumbnail_url')
+
+                        # Convert direct S3 URLs to pre-signed URLs
+                        if thumbnail_url and 's3.amazonaws.com' in thumbnail_url and '?' not in thumbnail_url:
+                            # This is a direct S3 URL, convert to pre-signed
+                            try:
+                                # Extract S3 key from URL
+                                if 'scl-sensing-garden-videos.s3.amazonaws.com/' in thumbnail_url:
+                                    s3_key = thumbnail_url.split('scl-sensing-garden-videos.s3.amazonaws.com/')[1]
+                                    thumbnail_url = s3_client.generate_presigned_url(
+                                        'get_object',
+                                        Params={'Bucket': 'scl-sensing-garden-videos', 'Key': s3_key},
+                                        ExpiresIn=3600  # 1 hour expiration
+                                    )
+                            except Exception as e:
+                                print(f"Error generating pre-signed URL for thumbnail {thumbnail_url}: {e}")
+                                thumbnail_url = None
+                        elif not thumbnail_url and video.get('video_url'):
+                            # Try to construct thumbnail key from video URL and check if it exists
+                            video_url = video.get('video_url')
+                            if 'scl-sensing-garden-videos.s3.amazonaws.com' in video_url or video_url.startswith('https://') and 'amazonaws.com' in video_url:
+                                # Extract the video key and create thumbnail key
+                                if 'scl-sensing-garden-videos.s3.amazonaws.com/' in video_url:
+                                    video_key = video_url.split('scl-sensing-garden-videos.s3.amazonaws.com/')[1].split('?')[0]  # Remove query params
+                                else:
+                                    # Handle pre-signed URLs
+                                    video_key = video_url.split('amazonaws.com/')[1].split('?')[0]
+                                thumbnail_key = video_key.replace('.mp4', '_thumbnail.jpg')
+
+                                # Check if thumbnail exists in S3 and generate pre-signed URL
+                                try:
+                                    s3_client.head_object(Bucket='scl-sensing-garden-videos', Key=thumbnail_key)
+                                    # Thumbnail exists, generate pre-signed URL
+                                    thumbnail_url = s3_client.generate_presigned_url(
+                                        'get_object',
+                                        Params={'Bucket': 'scl-sensing-garden-videos', 'Key': thumbnail_key},
+                                        ExpiresIn=3600  # 1 hour expiration
+                                    )
+                                except:
+                                    # Thumbnail doesn't exist, leave thumbnail_url as None
+                                    thumbnail_url = None
+
                         video_entry = {
                             'device_id': device_id,
                             'video_id': f"{device_id}_{video.get('timestamp', 'unknown')}",
@@ -1043,8 +1148,7 @@ def sidara_analysis():
                             'formatted_time': video.get('formatted_time'),
                             'duration': video.get('duration', 0),  # Duration in seconds if available
                             'metadata': video.get('metadata', {}),
-                            # We'll extract these in the frontend from video_url for thumbnails
-                            'thumbnail_url': video.get('thumbnail_url') or video.get('video_url')
+                            'thumbnail_url': thumbnail_url or video.get('video_url')  # Fall back to video URL if no thumbnail
                         }
                         video_data['videos'].append(video_entry)
 
@@ -1059,7 +1163,7 @@ def sidara_analysis():
 
         # Add metadata for pagination
         video_data['displayed_videos'] = len(video_data['videos'])
-        video_data['initial_batch_size'] = 30
+        video_data['initial_batch_size'] = 100
 
         print(f"Sidara video categorization ready: {len(video_data['videos'])} videos loaded (of {video_data['total_videos']} total) from {len(SIDARA_DEVICES)} devices")
 
@@ -1306,6 +1410,206 @@ def sidara_filtered_analysis():
         print(f"[ERROR] Error in filtered analysis: {str(e)}")
         import traceback
         traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+# Thumbnail Generator Routes
+@app.route('/thumbnail-generator')
+def thumbnail_generator():
+    """Serve the thumbnail generator page."""
+    return render_template('thumbnail_generator.html')
+
+@app.route('/api/thumbnail-generator/list-videos')
+def list_videos_for_thumbnails():
+    """List all videos that need thumbnails."""
+    try:
+        s3_client = boto3.client('s3',
+            aws_access_key_id=AWS_ACCESS_KEY_ID,
+            aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
+            region_name='us-east-1'
+        )
+
+        videos = []
+        paginator = s3_client.get_paginator('list_objects_v2')
+
+        # List all .mp4 files in videos/ prefix
+        for page in paginator.paginate(Bucket='scl-sensing-garden-videos', Prefix='videos/'):
+            if 'Contents' in page:
+                for obj in page['Contents']:
+                    if obj['Key'].endswith('.mp4'):
+                        # Generate pre-signed URL for CORS-free access
+                        url = s3_client.generate_presigned_url(
+                            'get_object',
+                            Params={'Bucket': 'scl-sensing-garden-videos', 'Key': obj['Key']},
+                            ExpiresIn=3600  # 1 hour expiration
+                        )
+                        videos.append({
+                            'key': obj['Key'],
+                            'size': obj['Size'],
+                            'url': url
+                        })
+
+        return jsonify({'videos': videos})
+    except Exception as e:
+        print(f"Error listing videos: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/thumbnail-generator/check-thumbnail', methods=['POST'])
+def check_thumbnail_exists():
+    """Check if a thumbnail already exists for a video."""
+    try:
+        data = request.json
+        video_key = data.get('video_key')
+
+        # Parse device_id and timestamp from video key
+        parts = video_key.split('/')
+        if len(parts) >= 3:
+            device_id = parts[1]
+            filename_timestamp = parts[2].replace('.mp4', '')
+
+            # Convert filename timestamp to DB format
+            if 'T' in filename_timestamp:
+                date_part, time_part = filename_timestamp.split('T')
+                time_parts = time_part.split('-')
+                if len(time_parts) == 4:
+                    db_timestamp = f"{date_part}T{time_parts[0]}:{time_parts[1]}:{time_parts[2]}.{time_parts[3]}"
+                else:
+                    db_timestamp = filename_timestamp
+            else:
+                db_timestamp = filename_timestamp
+
+            # First check DynamoDB for existing thumbnail_url
+            try:
+                dynamodb = boto3.resource('dynamodb',
+                    aws_access_key_id=AWS_ACCESS_KEY_ID,
+                    aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
+                    region_name='us-east-1'
+                )
+                table = dynamodb.Table('sensing-garden-videos')
+
+                response = table.get_item(
+                    Key={
+                        'device_id': device_id,
+                        'timestamp': db_timestamp
+                    }
+                )
+
+                if 'Item' in response and 'thumbnail_url' in response['Item']:
+                    print(f"✓ Thumbnail already in DynamoDB for {device_id}/{db_timestamp}")
+                    return jsonify({'exists': True, 'source': 'dynamodb'})
+            except Exception as db_error:
+                print(f"DynamoDB check error: {db_error}")
+                # Continue to S3 check even if DynamoDB fails
+
+        # If not in DynamoDB, check S3
+        s3_client = boto3.client('s3',
+            aws_access_key_id=AWS_ACCESS_KEY_ID,
+            aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
+            region_name='us-east-1'
+        )
+
+        thumbnail_key = video_key.replace('videos/', 'thumbnails/').replace('.mp4', '.jpg')
+
+        try:
+            s3_client.head_object(Bucket='scl-sensing-garden-videos', Key=thumbnail_key)
+            print(f"✓ Thumbnail exists in S3 but not DynamoDB for {video_key}")
+            return jsonify({'exists': True, 'source': 's3'})
+        except:
+            return jsonify({'exists': False})
+
+    except Exception as e:
+        print(f"Error checking thumbnail: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/thumbnail-generator/upload-thumbnail', methods=['POST'])
+def upload_thumbnail():
+    """Upload a thumbnail to S3 and optionally update DynamoDB."""
+    try:
+        data = request.json
+        video_key = data.get('video_key')
+        thumbnail_data = data.get('thumbnail_data')
+        update_db = data.get('update_db', False)
+
+        # Remove data URL prefix
+        if ',' in thumbnail_data:
+            thumbnail_data = thumbnail_data.split(',')[1]
+
+        # Decode base64
+        import base64
+        thumbnail_bytes = base64.b64decode(thumbnail_data)
+
+        s3_client = boto3.client('s3',
+            aws_access_key_id=AWS_ACCESS_KEY_ID,
+            aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
+            region_name='us-east-1'
+        )
+
+        thumbnail_key = video_key.replace('videos/', 'thumbnails/').replace('.mp4', '.jpg')
+
+        # Upload to S3
+        s3_client.put_object(
+            Bucket='scl-sensing-garden-videos',
+            Key=thumbnail_key,
+            Body=thumbnail_bytes,
+            ContentType='image/jpeg',
+            CacheControl='max-age=31536000'
+        )
+
+        # Update DynamoDB if requested
+        if update_db:
+            try:
+                # Parse device_id and timestamp from video key
+                parts = video_key.split('/')
+                if len(parts) >= 3:
+                    device_id = parts[1]
+                    filename_timestamp = parts[2].replace('.mp4', '')
+
+                    # Convert filename timestamp to DB format
+                    # From: 2025-04-25T13-35-10-555752
+                    # To:   2025-04-25T13:35:10.555752
+                    if 'T' in filename_timestamp:
+                        date_part, time_part = filename_timestamp.split('T')
+                        time_parts = time_part.split('-')
+                        if len(time_parts) == 4:
+                            db_timestamp = f"{date_part}T{time_parts[0]}:{time_parts[1]}:{time_parts[2]}.{time_parts[3]}"
+                        else:
+                            db_timestamp = filename_timestamp
+                    else:
+                        db_timestamp = filename_timestamp
+
+                    # Update DynamoDB
+                    dynamodb = boto3.resource('dynamodb',
+                        aws_access_key_id=AWS_ACCESS_KEY_ID,
+                        aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
+                        region_name='us-east-1'
+                    )
+                    table = dynamodb.Table('sensing-garden-videos')
+
+                    thumbnail_url = f"https://scl-sensing-garden-videos.s3.amazonaws.com/{thumbnail_key}"
+
+                    response = table.update_item(
+                        Key={
+                            'device_id': device_id,
+                            'timestamp': db_timestamp
+                        },
+                        UpdateExpression='SET thumbnail_url = :url',
+                        ExpressionAttributeValues={
+                            ':url': thumbnail_url
+                        },
+                        ReturnValues='ALL_NEW'
+                    )
+                    print(f"✅ DynamoDB updated: device={device_id}, timestamp={db_timestamp}")
+                    print(f"   Thumbnail URL: {thumbnail_url}")
+                    print(f"   Response: {response['ResponseMetadata']['HTTPStatusCode']}")
+            except Exception as db_error:
+                print(f"❌ DynamoDB update failed: {db_error}")
+                print(f"   device_id: {device_id}")
+                print(f"   timestamp: {db_timestamp}")
+                # Don't fail the whole request if DB update fails
+
+        return jsonify({'success': True, 'thumbnail_key': thumbnail_key})
+
+    except Exception as e:
+        print(f"Error uploading thumbnail: {e}")
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':

@@ -9,6 +9,7 @@
         <div class="col-12 text-center">
             <h1 class="display-4 mb-3">How many hours of footage and what timespan?</h1>
             <p class="lead text-muted">Interactive video categorization for Sidara devices</p>
+            <div class="version-info text-muted small">Version: 3.0.0 - Thumbnail Display & Shift+Click Range Selection</div>
         </div>
     </div>
 
@@ -71,6 +72,7 @@
                 <div>
                     <button id="select-all-visible" class="btn btn-outline-primary">Select All Visible</button>
                     <button id="clear-selection" class="btn btn-outline-secondary">Clear Selection</button>
+                    <button id="toggle-categorized" class="btn btn-outline-info">Show Categorized</button>
                     <span id="selected-count" class="badge badge-info ml-2">0 selected</span>
                 </div>
                 <div>
@@ -87,7 +89,7 @@
         <div class="col-12">
             <div class="alert alert-light">
                 <strong>Keyboard Shortcuts:</strong>
-                <kbd>R</kbd> = Real, <kbd>T</kbd> = Test, <kbd>Space</kbd> = Select, <kbd>A</kbd> = Select All Visible, <kbd>C</kbd> = Clear Selection
+                <kbd>R</kbd> = Real, <kbd>T</kbd> = Test, <kbd>Space</kbd> = Select, <kbd>A</kbd> = Select All Visible, <kbd>C</kbd> = Clear Selection, <kbd>Shift+Click</kbd> = Range Select
             </div>
         </div>
     </div>
@@ -105,38 +107,17 @@
                         </div>
                     </div>
 
-                    <!-- Video Thumbnail/Preview -->
+                    <!-- Video Thumbnail -->
                     <div class="video-preview-container position-relative">
-                        {% if video.video_url %}
-                        <div class="video-thumbnail-wrapper" style="width: 100%; height: 200px; position: relative; cursor: pointer;" onclick="toggleVideoSelection('{{ video.video_id }}')">
-                            <!-- Loading placeholder -->
-                            <div class="thumbnail-loading bg-light d-flex align-items-center justify-content-center" style="width: 100%; height: 100%; position: absolute; top: 0; left: 0;">
-                                <div class="spinner-border spinner-border-sm text-primary" role="status">
-                                    <span class="sr-only">Loading...</span>
-                                </div>
-                                <span class="text-muted ml-2">Loading thumbnail...</span>
-                            </div>
-
-                            <!-- Canvas for thumbnail -->
-                            <canvas class="video-thumbnail-canvas"
-                                    data-video-url="{{ video.video_url|safe }}"
-                                    style="width: 100%; height: 100%; object-fit: cover; display: none; position: absolute; top: 0; left: 0;">
-                            </canvas>
-
-                            <!-- Fallback image -->
-                            <img class="video-thumbnail-fallback"
-                                 style="width: 100%; height: 100%; object-fit: cover; display: none; position: absolute; top: 0; left: 0;"
-                                 alt="Video thumbnail">
-
-                            <!-- Error placeholder -->
-                            <div class="thumbnail-error bg-light d-flex align-items-center justify-content-center flex-column" style="width: 100%; height: 100%; position: absolute; top: 0; left: 0; display: none;">
-                                <i class="fas fa-video text-muted mb-2" style="font-size: 2rem;"></i>
-                                <span class="text-muted">Video Preview</span>
-                                <small class="text-muted">{{ video.duration }}s</small>
-                            </div>
+                        {% if video.thumbnail_url %}
+                        <div class="video-thumbnail-wrapper" style="width: 100%; height: 200px; position: relative; cursor: pointer; background: #f0f0f0;" onclick="toggleVideoSelection('{{ video.video_id }}', event)">
+                            <img src="{{ video.thumbnail_url|safe }}"
+                                 style="width: 100%; height: 100%; object-fit: cover;"
+                                 alt="Video thumbnail"
+                                 onerror="this.onerror=null; this.src='{{ video.video_url|safe }}'; this.style.objectFit='contain';">
                         </div>
                         {% else %}
-                        <div class="bg-light d-flex align-items-center justify-content-center" style="height: 200px; cursor: pointer;" onclick="toggleVideoSelection('{{ video.video_id }}')">
+                        <div class="bg-light d-flex align-items-center justify-content-center" style="height: 200px; cursor: pointer;" onclick="toggleVideoSelection('{{ video.video_id }}', event)">
                             <span class="text-muted">No Video</span>
                         </div>
                         {% endif %}
@@ -262,8 +243,11 @@ kbd {
 let categorizedVideos = {};
 let selectedVideos = new Set();
 let allVideos = [];
+let hideCategorizeds = true; // Hide categorized videos by default
+let frameCache = {}; // Move frameCache to global scope
 let currentOffset = {{ data.displayed_videos if data else 0 }};
 const devices = {{ data.devices | tojson if data and data.devices else '[]' }};
+let lastSelectedVideoId = null; // Track last selected video for range selection
 
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', function() {
@@ -320,6 +304,13 @@ function updateVideoDisplays() {
         buttons.forEach(btn => btn.classList.remove('active'));
 
         if (category) {
+            // Hide categorized videos if option is enabled
+            if (hideCategorizeds) {
+                item.style.display = 'none';
+            } else {
+                item.style.display = '';
+            }
+
             card.classList.add(`categorized-${category}`);
             statusBadge.textContent = category.charAt(0).toUpperCase() + category.slice(1);
             statusBadge.className = `badge badge-${category === 'real' ? 'success' : 'warning'}`;
@@ -330,6 +321,7 @@ function updateVideoDisplays() {
                 activeButton.classList.add('active');
             }
         } else {
+            item.style.display = '';
             statusBadge.textContent = 'Uncategorized';
             statusBadge.className = 'badge badge-light';
         }
@@ -363,13 +355,19 @@ async function loadMoreVideos() {
     try {
         // Load videos from each device
         for (const deviceId of devices) {
-            const response = await fetch(`/sidara/load-more-videos?device_id=${deviceId}&offset=${Math.floor(currentOffset/3)}&limit=30`);
+            const response = await fetch(`/sidara/load-more-videos?device_id=${deviceId}&offset=${Math.floor(currentOffset/3)}&limit=100`);
             const data = await response.json();
 
             if (data.videos && data.videos.length > 0) {
                 // Add new video cards to the grid
                 const grid = document.getElementById('video-grid');
                 data.videos.forEach(video => {
+                    // Skip if already categorized and we're hiding them
+                    if (hideCategorizeds && categorizedVideos[video.video_id]) {
+                        console.log(`Skipping already categorized video: ${video.video_id}`);
+                        return;
+                    }
+
                     const videoCard = createVideoCard(video);
                     grid.insertAdjacentHTML('beforeend', videoCard);
                 });
@@ -378,8 +376,7 @@ async function loadMoreVideos() {
             }
         }
 
-        // Re-initialize event handlers for new videos
-        initializeNewVideos();
+        // No video preview initialization needed anymore
 
         // Update remaining count
         const totalVideos = {{ data.total_videos if data else 0 }};
@@ -401,26 +398,15 @@ async function loadMoreVideos() {
 
 // Create video card HTML
 function createVideoCard(video) {
-    const videoHtml = video.video_url ? `
-        <div class="video-thumbnail-wrapper" style="width: 100%; height: 100%; position: relative;">
-            <div class="thumbnail-loading d-flex align-items-center justify-content-center" style="width: 100%; height: 100%; position: absolute; top: 0; left: 0;">
-                <div class="spinner-border text-primary" role="status">
-                    <span class="sr-only">Loading...</span>
-                </div>
-            </div>
-            <canvas class="video-thumbnail-canvas"
-                    data-video-url="${video.video_url}"
-                    style="width: 100%; height: 100%; object-fit: cover; display: none; position: absolute; top: 0; left: 0;">
-            </canvas>
-            <img class="video-thumbnail-fallback"
-                 style="width: 100%; height: 100%; object-fit: cover; display: none; position: absolute; top: 0; left: 0;"
-                 alt="Video thumbnail">
-            <div class="thumbnail-error bg-light d-flex align-items-center justify-content-center flex-column" style="width: 100%; height: 100%; position: absolute; top: 0; left: 0; display: none;">
-                <i class="fas fa-video text-muted mb-2" style="font-size: 2rem;"></i>
-                <span class="text-muted">Video Preview</span>
-                <small class="text-muted">${video.duration || 0}s</small>
-            </div>
-        </div>
+    const thumbnailHtml = video.thumbnail_url ? `
+        <img src="${video.thumbnail_url}"
+             style="width: 100%; height: 200px; object-fit: cover;"
+             alt="Video thumbnail"
+             onerror="this.onerror=null; this.src='${video.video_url}'; this.style.objectFit='contain';">
+    ` : video.video_url ? `
+        <img src="${video.video_url}"
+             style="width: 100%; height: 200px; object-fit: contain;"
+             alt="Video fallback">
     ` : `
         <div class="bg-light d-flex align-items-center justify-content-center" style="height: 200px;">
             <span class="text-muted">No Video</span>
@@ -436,8 +422,8 @@ function createVideoCard(video) {
                     <span class="badge badge-light">Uncategorized</span>
                 </div>
             </div>
-            <div class="position-relative video-thumbnail" style="height: 200px; overflow: hidden; cursor: pointer;" onclick="toggleVideoSelection('${video.video_id}')">
-                ${videoHtml}
+            <div class="position-relative video-thumbnail" style="height: 200px; overflow: hidden; cursor: pointer;" onclick="toggleVideoSelection('${video.video_id}', event)">
+                ${thumbnailHtml}
                 <div class="selection-overlay position-absolute" style="top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,123,255,0.3); display: none;">
                     <div class="position-absolute" style="top: 10px; right: 10px;">
                         <i class="fas fa-check-circle text-white" style="font-size: 24px;"></i>
@@ -463,20 +449,7 @@ function createVideoCard(video) {
 }
 
 // Initialize event handlers for newly loaded videos
-function initializeNewVideos() {
-    // Set up lazy loading for new thumbnails
-    const newCanvases = document.querySelectorAll('.video-thumbnail-canvas:not([data-processed])');
-    newCanvases.forEach(canvas => {
-        if (typeof observer !== 'undefined') {
-            observer.observe(canvas);
-        }
-    });
-
-    // Apply existing categorizations
-    Object.keys(categorizedVideos).forEach(videoId => {
-        updateVideoUI(videoId, categorizedVideos[videoId]);
-    });
-}
+// initializeNewVideos function removed - no longer needed with static thumbnails
 
 function updateStatistics() {
     const realVideos = [];
@@ -549,21 +522,63 @@ function updateTimespanDisplay(type, timespan, videoCount) {
     }
 }
 
-function toggleVideoSelection(videoId) {
+function toggleVideoSelection(videoId, event = null) {
     const item = document.querySelector(`[data-video-id="${videoId}"]`);
     const card = item.querySelector('.video-card');
     const overlay = item.querySelector('.selection-overlay');
+
+    // Handle shift+click for range selection
+    if (event && event.shiftKey && lastSelectedVideoId && lastSelectedVideoId !== videoId) {
+        selectVideoRange(lastSelectedVideoId, videoId);
+        return;
+    }
 
     if (selectedVideos.has(videoId)) {
         selectedVideos.delete(videoId);
         card.classList.remove('selected');
         overlay.style.display = 'none';
+        // If we're deselecting the last selected video, clear the reference
+        if (lastSelectedVideoId === videoId) {
+            lastSelectedVideoId = null;
+        }
     } else {
         selectedVideos.add(videoId);
         card.classList.add('selected');
         overlay.style.display = 'block';
+        lastSelectedVideoId = videoId;
     }
 
+    updateSelectionUI();
+}
+
+function selectVideoRange(fromVideoId, toVideoId) {
+    // Get all visible video items in DOM order
+    const allVideoItems = Array.from(document.querySelectorAll('.video-item'));
+    const fromIndex = allVideoItems.findIndex(item => item.dataset.videoId === fromVideoId);
+    const toIndex = allVideoItems.findIndex(item => item.dataset.videoId === toVideoId);
+
+    if (fromIndex === -1 || toIndex === -1) return;
+
+    // Determine the range (inclusive)
+    const startIndex = Math.min(fromIndex, toIndex);
+    const endIndex = Math.max(fromIndex, toIndex);
+
+    // Select all videos in the range
+    for (let i = startIndex; i <= endIndex; i++) {
+        const videoId = allVideoItems[i].dataset.videoId;
+        const item = allVideoItems[i];
+        const card = item.querySelector('.video-card');
+        const overlay = item.querySelector('.selection-overlay');
+
+        if (!selectedVideos.has(videoId)) {
+            selectedVideos.add(videoId);
+            card.classList.add('selected');
+            overlay.style.display = 'block';
+        }
+    }
+
+    // Update the last selected video to the clicked one
+    lastSelectedVideoId = toVideoId;
     updateSelectionUI();
 }
 
@@ -633,6 +648,20 @@ function setupBatchActions() {
     document.getElementById('batch-real').addEventListener('click', () => batchCategorize('real'));
     document.getElementById('batch-test').addEventListener('click', () => batchCategorize('test'));
     document.getElementById('clear-all-data').addEventListener('click', clearAllData);
+
+    // Toggle categorized videos visibility
+    document.getElementById('toggle-categorized').addEventListener('click', function() {
+        hideCategorizeds = !hideCategorizeds;
+        this.textContent = hideCategorizeds ? 'Show Categorized' : 'Hide Categorized';
+        this.className = hideCategorizeds ? 'btn btn-outline-info' : 'btn btn-info';
+        updateVideoDisplays();
+
+        // Update statistics to show current state
+        const hiddenCount = Object.keys(categorizedVideos).length;
+        if (hideCategorizeds && hiddenCount > 0) {
+            console.log(`Hiding ${hiddenCount} categorized videos`);
+        }
+    });
 }
 
 function selectAllVisible() {
@@ -666,140 +695,50 @@ function batchCategorize(category) {
 }
 
 function clearAllData() {
-    if (confirm('Are you sure you want to clear all categorization data? This cannot be undone.')) {
+    // First confirmation
+    if (!confirm('⚠️ WARNING: This will clear ALL categorization data!\n\nAre you sure you want to continue?')) {
+        return;
+    }
+
+    // Second confirmation with details
+    const totalCategorized = Object.keys(categorizedVideos).length;
+    const totalCached = Object.keys(frameCache).length;
+
+    const message = `🚨 FINAL CONFIRMATION 🚨\n\n` +
+                    `This will permanently delete:\n` +
+                    `• ${totalCategorized} video categorizations\n` +
+                    `• ${totalCached} cached video frames\n\n` +
+                    `Type "DELETE" to confirm:`;
+
+    const userInput = prompt(message);
+
+    if (userInput === 'DELETE') {
+        // Clear categorization data
         categorizedVideos = {};
         localStorage.removeItem('sidara_categorization');
+
+        // Also clear frame cache
+        frameCache = {};
+        localStorage.removeItem('sidara_frame_cache');
+
         updateVideoDisplays();
         updateStatistics();
         clearSelection();
-        console.log('All categorization data cleared');
+
+        console.log('✅ All data cleared successfully');
+        alert('All data has been cleared. Page will refresh.');
+        location.reload();
+    } else {
+        console.log('❌ Clear operation cancelled');
+        alert('Clear operation cancelled - your data is safe.');
     }
 }
 
-// Load video thumbnails using client-side extraction
-document.addEventListener('DOMContentLoaded', function() {
-    const observer = new IntersectionObserver((entries) => {
-        entries.forEach(entry => {
-            if (entry.isIntersecting) {
-                const canvas = entry.target;
-                const videoUrl = canvas.dataset.videoUrl;
-                if (videoUrl && !canvas.dataset.processed) {
-                    canvas.dataset.processed = 'true';
-                    extractVideoThumbnail(canvas);
-                }
-            }
-        });
-    });
+// Video thumbnails are now loaded directly from S3/DynamoDB - no complex preview system needed
 
-    document.querySelectorAll('.video-thumbnail-canvas').forEach(canvas => {
-        observer.observe(canvas);
-    });
-});
+// No frame caching needed - using static thumbnails from S3
 
-function extractVideoThumbnail(canvas) {
-    const videoUrl = canvas.dataset.videoUrl;
-    const wrapper = canvas.closest('.video-thumbnail-wrapper');
-    const loadingDiv = wrapper.querySelector('.thumbnail-loading');
-    const fallbackImg = wrapper.querySelector('.video-thumbnail-fallback');
-    const errorDiv = wrapper.querySelector('.thumbnail-error');
+// Removed complex video preview and caching system - now using simple thumbnails
 
-    // Create a hidden video element for frame extraction
-    const video = document.createElement('video');
-    video.crossOrigin = 'anonymous';
-    video.muted = true;
-    video.style.display = 'none';
-
-    let thumbnailExtracted = false;
-
-    // Setup video event handlers
-    video.addEventListener('loadeddata', function() {
-        if (thumbnailExtracted) return;
-
-        try {
-            // Set video time to 1 second to get a better frame
-            this.currentTime = Math.min(1, this.duration * 0.1);
-        } catch (e) {
-            console.warn('Could not set video time:', e);
-            extractFrame();
-        }
-    });
-
-    video.addEventListener('seeked', extractFrame);
-
-    video.addEventListener('canplay', function() {
-        if (thumbnailExtracted) return;
-        // Fallback if seeked event doesn't fire
-        setTimeout(extractFrame, 100);
-    });
-
-    video.addEventListener('error', function(e) {
-        console.warn('Video load error, trying server fallback:', e);
-        tryServerFallback();
-    });
-
-    function extractFrame() {
-        if (thumbnailExtracted) return;
-        thumbnailExtracted = true;
-
-        try {
-            // Set canvas size to video dimensions
-            canvas.width = video.videoWidth || 640;
-            canvas.height = video.videoHeight || 360;
-
-            // Draw video frame to canvas
-            const ctx = canvas.getContext('2d');
-            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-            // Show canvas and hide loading
-            loadingDiv.style.display = 'none';
-            canvas.style.display = 'block';
-
-            // Clean up video element
-            video.remove();
-
-        } catch (e) {
-            console.warn('Canvas extraction failed, trying server fallback:', e);
-            tryServerFallback();
-        }
-    }
-
-    function tryServerFallback() {
-        if (thumbnailExtracted) return;
-        thumbnailExtracted = true;
-
-        // Try server-side frame extraction
-        const frameUrl = `/video_frame_proxy?url=${encodeURIComponent(videoUrl)}`;
-
-        fallbackImg.onload = function() {
-            loadingDiv.style.display = 'none';
-            fallbackImg.style.display = 'block';
-            video.remove();
-        };
-
-        fallbackImg.onerror = function() {
-            // Final fallback - show error placeholder
-            loadingDiv.style.display = 'none';
-            errorDiv.style.display = 'flex';
-            video.remove();
-        };
-
-        fallbackImg.src = frameUrl;
-    }
-
-    // Add video to DOM and start loading (hidden)
-    document.body.appendChild(video);
-
-    // Add timeout to prevent hanging
-    setTimeout(() => {
-        if (!thumbnailExtracted) {
-            console.warn('Thumbnail extraction timeout, using server fallback');
-            tryServerFallback();
-        }
-    }, 5000);
-
-    // Start video loading
-    video.src = videoUrl;
-    video.load();
-}
 </script>
 {% endblock %}

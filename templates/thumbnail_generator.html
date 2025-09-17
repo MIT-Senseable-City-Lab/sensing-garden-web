@@ -1,0 +1,683 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sidara Thumbnail Generator</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .header {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .version-info {
+            margin-top: 10px;
+            font-size: 12px;
+            color: #666;
+            font-style: italic;
+        }
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            background: #007bff;
+            color: white;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .stop-btn {
+            background: #dc3545;
+        }
+        .stop-btn:hover {
+            background: #c82333;
+        }
+        .stats {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .progress-bar {
+            width: 100%;
+            height: 30px;
+            background: #e9ecef;
+            border-radius: 4px;
+            overflow: hidden;
+            margin: 10px 0;
+        }
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #28a745, #20c997);
+            transition: width 0.3s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+        }
+        .log {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .log-entry {
+            padding: 5px 0;
+            border-bottom: 1px solid #eee;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+        }
+        .log-entry.success { color: #28a745; }
+        .log-entry.error { color: #dc3545; }
+        .log-entry.info { color: #17a2b8; }
+        .log-entry.warning { color: #ffc107; }
+        .hidden-video {
+            position: absolute;
+            left: -9999px;
+            width: 640px;
+            height: 360px;
+        }
+        .stat-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+        }
+        .stat-item {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 4px;
+        }
+        .stat-label {
+            color: #6c757d;
+            font-size: 12px;
+            margin-bottom: 5px;
+        }
+        .stat-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #212529;
+        }
+        .thumbnail-preview {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .thumbnail-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+            gap: 10px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        .thumbnail-item {
+            position: relative;
+            border-radius: 4px;
+            overflow: hidden;
+            background: #f8f9fa;
+        }
+        .thumbnail-item img {
+            width: 100%;
+            height: auto;
+            display: block;
+        }
+        .thumbnail-info {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: rgba(0,0,0,0.7);
+            color: white;
+            padding: 2px 5px;
+            font-size: 10px;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            overflow: hidden;
+        }
+        .db-status {
+            display: inline-block;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 11px;
+            font-weight: bold;
+            margin-left: 5px;
+        }
+        .db-success {
+            background: #28a745;
+            color: white;
+        }
+        .db-failed {
+            background: #dc3545;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🎬 Sidara Thumbnail Generator</h1>
+        <p>Generate and upload thumbnails for all Sidara videos using browser-based processing</p>
+        <div class="version-info">Version: 2.2.0 - Skip Interval Support</div>
+    </div>
+
+    <div class="controls">
+        <button id="startBtn" onclick="startGeneration()">Start Generation</button>
+        <button id="stopBtn" class="stop-btn" onclick="stopGeneration()" disabled>Stop</button>
+        <button onclick="clearLog()">Clear Log</button>
+        <label>
+            <input type="checkbox" id="updateDbCheckbox" checked>
+            Update DynamoDB
+        </label>
+        <label>
+            Batch Size:
+            <input type="number" id="batchSize" value="4" min="1" max="10" style="width: 50px;">
+        </label>
+        <label>
+            Skip Interval:
+            <input type="number" id="skipInterval" value="1" min="1" max="100" style="width: 50px;" title="Process every Nth video (1=all, 10=every 10th, 12=every 12th)">
+        </label>
+    </div>
+
+    <div class="thumbnail-preview">
+        <h3>Recent Thumbnails (Last 20)</h3>
+        <div class="thumbnail-grid" id="thumbnailGrid">
+            <p style="color: #6c757d;">No thumbnails generated yet...</p>
+        </div>
+    </div>
+
+    <div class="stats">
+        <div class="stat-grid">
+            <div class="stat-item">
+                <div class="stat-label">Total Videos</div>
+                <div class="stat-value" id="totalVideos">0</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-label">Processed</div>
+                <div class="stat-value" id="processed">0</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-label">Successful</div>
+                <div class="stat-value" id="successful">0</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-label">Failed</div>
+                <div class="stat-value" id="failed">0</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-label">Skipped (Exists)</div>
+                <div class="stat-value" id="skipped">0</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-label">Est. Time Remaining</div>
+                <div class="stat-value" id="timeRemaining">--:--</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-label">Total Downloaded</div>
+                <div class="stat-value" id="totalDownloaded">0 MB</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-label">Avg Per Video</div>
+                <div class="stat-value" id="avgPerVideo">-- MB</div>
+            </div>
+        </div>
+        <div class="progress-bar">
+            <div class="progress-fill" id="progressFill" style="width: 0%">0%</div>
+        </div>
+    </div>
+
+    <div class="log" id="log"></div>
+
+    <!-- Hidden video element for frame extraction -->
+    <video id="videoElement" class="hidden-video" muted crossorigin="anonymous"></video>
+
+    <script>
+        let isRunning = false;
+        let videos = [];
+        let currentIndex = 0;
+        let stats = {
+            total: 0,
+            processed: 0,
+            successful: 0,
+            failed: 0,
+            skipped: 0
+        };
+        let startTime = null;
+        let recentThumbnails = [];
+        let totalBytesDownloaded = 0;
+
+        function log(message, type = 'info') {
+            const logDiv = document.getElementById('log');
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${type}`;
+            const timestamp = new Date().toLocaleTimeString();
+            entry.textContent = `[${timestamp}] ${message}`;
+            logDiv.insertBefore(entry, logDiv.firstChild);
+
+            // Keep only last 100 entries
+            while (logDiv.children.length > 100) {
+                logDiv.removeChild(logDiv.lastChild);
+            }
+        }
+
+        function clearLog() {
+            document.getElementById('log').innerHTML = '';
+        }
+
+        function updateStats() {
+            document.getElementById('totalVideos').textContent = stats.total;
+            document.getElementById('processed').textContent = stats.processed;
+            document.getElementById('successful').textContent = stats.successful;
+            document.getElementById('failed').textContent = stats.failed;
+            document.getElementById('skipped').textContent = stats.skipped;
+
+            // Update bandwidth stats
+            const totalMB = (totalBytesDownloaded / (1024 * 1024)).toFixed(2);
+            document.getElementById('totalDownloaded').textContent = `${totalMB} MB`;
+
+            const videosWithData = stats.successful + stats.failed;
+            if (videosWithData > 0) {
+                const avgMB = (totalBytesDownloaded / (1024 * 1024) / videosWithData).toFixed(2);
+                document.getElementById('avgPerVideo').textContent = `${avgMB} MB`;
+            }
+
+            const progress = stats.total > 0 ? (stats.processed / stats.total * 100) : 0;
+            document.getElementById('progressFill').style.width = progress + '%';
+            document.getElementById('progressFill').textContent = progress.toFixed(1) + '%';
+
+            // Estimate time remaining
+            if (startTime && stats.processed > 0) {
+                const elapsed = Date.now() - startTime;
+                const avgTimePerVideo = elapsed / stats.processed;
+                const remaining = stats.total - stats.processed;
+                const estimatedMs = remaining * avgTimePerVideo;
+                const minutes = Math.floor(estimatedMs / 60000);
+                const seconds = Math.floor((estimatedMs % 60000) / 1000);
+                document.getElementById('timeRemaining').textContent =
+                    `${minutes}:${seconds.toString().padStart(2, '0')}`;
+            }
+        }
+
+        async function fetchVideos() {
+            log('Fetching video list from server...');
+            try {
+                const response = await fetch('/api/thumbnail-generator/list-videos');
+                const data = await response.json();
+                videos = data.videos;
+                stats.total = videos.length;
+                updateStats();
+                log(`Found ${videos.length} videos to process`, 'success');
+                return true;
+            } catch (error) {
+                log(`Failed to fetch videos: ${error.message}`, 'error');
+                return false;
+            }
+        }
+
+        async function checkThumbnailExists(videoKey) {
+            try {
+                const response = await fetch('/api/thumbnail-generator/check-thumbnail', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ video_key: videoKey })
+                });
+                const data = await response.json();
+                return data.exists;
+            } catch (error) {
+                return false;
+            }
+        }
+
+        async function uploadThumbnail(videoKey, thumbnailDataUrl, updateDb) {
+            try {
+                // Log thumbnail size
+                const sizeKB = (thumbnailDataUrl.length * 0.75 / 1024).toFixed(1);
+                log(`Thumbnail size: ${sizeKB} KB`, 'info');
+
+                const response = await fetch('/api/thumbnail-generator/upload-thumbnail', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        video_key: videoKey,
+                        thumbnail_data: thumbnailDataUrl,
+                        update_db: updateDb
+                    })
+                });
+                const data = await response.json();
+
+                if (data.success) {
+                    // Add to recent thumbnails display
+                    addThumbnailPreview(videoKey, thumbnailDataUrl, updateDb, true);
+
+                    if (updateDb) {
+                        log(`✅ S3 upload + DynamoDB update successful`, 'success');
+                    } else {
+                        log(`✅ S3 upload successful (DynamoDB skipped)`, 'success');
+                    }
+                }
+
+                return data.success;
+            } catch (error) {
+                log(`Upload failed: ${error.message}`, 'error');
+                return false;
+            }
+        }
+
+        function addThumbnailPreview(videoKey, dataUrl, dbUpdated, success) {
+            const videoId = videoKey.split('/').pop().replace('.mp4', '');
+            const deviceId = videoKey.split('/')[1];
+
+            // Add to recent thumbnails array
+            recentThumbnails.unshift({
+                id: videoId,
+                deviceId: deviceId,
+                dataUrl: dataUrl,
+                dbUpdated: dbUpdated,
+                success: success
+            });
+
+            // Keep only last 20
+            if (recentThumbnails.length > 20) {
+                recentThumbnails.pop();
+            }
+
+            // Update grid
+            const grid = document.getElementById('thumbnailGrid');
+            grid.innerHTML = '';
+
+            recentThumbnails.forEach(thumb => {
+                const item = document.createElement('div');
+                item.className = 'thumbnail-item';
+
+                const img = document.createElement('img');
+                img.src = thumb.dataUrl;
+                img.title = thumb.id;
+
+                const info = document.createElement('div');
+                info.className = 'thumbnail-info';
+                info.innerHTML = `
+                    ${thumb.deviceId.substring(0, 8)}...
+                    <span class="db-status ${thumb.dbUpdated && thumb.success ? 'db-success' : 'db-failed'}">
+                        ${thumb.dbUpdated && thumb.success ? 'DB✓' : 'DB✗'}
+                    </span>
+                `;
+
+                item.appendChild(img);
+                item.appendChild(info);
+                grid.appendChild(item);
+            });
+        }
+
+        function extractFrameFromVideo(video) {
+            return new Promise((resolve) => {
+                const canvas = document.createElement('canvas');
+                const scaleFactor = 0.5; // 50% of original size for ~20KB thumbnails
+                canvas.width = (video.videoWidth || 640) * scaleFactor;
+                canvas.height = (video.videoHeight || 360) * scaleFactor;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+                // Convert to JPEG with low quality for small size
+                canvas.toBlob((blob) => {
+                    if (blob) {
+                        const reader = new FileReader();
+                        reader.onloadend = () => {
+                            resolve(reader.result);
+                        };
+                        reader.readAsDataURL(blob);
+                    } else {
+                        resolve(null);
+                    }
+                }, 'image/jpeg', 0.5); // Increased quality for better ~20KB thumbnails
+            });
+        }
+
+        async function processVideo(videoData) {
+            const videoId = videoData.key.split('/').pop().replace('.mp4', '');
+            const deviceId = videoData.key.split('/')[1];
+            const sizeMB = (videoData.size / (1024 * 1024)).toFixed(1);
+
+            log(`📹 Processing: ${deviceId}/${videoId} (${sizeMB} MB)`, 'info');
+
+            // Check if thumbnail already exists
+            const exists = await checkThumbnailExists(videoData.key);
+            if (exists) {
+                log(`⏭️ Skipped: Thumbnail already exists`, 'warning');
+                stats.skipped++;
+                return true;
+            }
+
+            const video = document.getElementById('videoElement');
+
+            return new Promise((resolve) => {
+                let attempts = 0;
+                const maxAttempts = 3;
+
+                const tryExtraction = () => {
+                    // Add preload="metadata" to only load video metadata, not the whole video
+                    video.preload = 'metadata';
+                    video.src = videoData.url;
+
+                    // Wait for metadata to load before seeking
+                    video.onloadedmetadata = () => {
+                        video.currentTime = 1; // Seek to 1 second
+                    };
+
+                    const timeout = setTimeout(() => {
+                        attempts++;
+                        if (attempts < maxAttempts) {
+                            log(`Attempt ${attempts} failed for ${videoId}, retrying...`, 'warning');
+                            tryExtraction();
+                        } else {
+                            log(`Failed to process ${videoId} after ${maxAttempts} attempts`, 'error');
+                            stats.failed++;
+                            resolve(false);
+                        }
+                    }, 5000); // 5 second timeout per attempt
+
+                    // Track ACTUAL data loaded using Performance API
+                    let bytesLoaded = 0;
+                    const startMark = `video-start-${videoId}-${Date.now()}`;
+                    performance.mark(startMark);
+
+                    // Monitor actual network usage
+                    const checkBandwidth = () => {
+                        if (performance.getEntriesByType) {
+                            const entries = performance.getEntriesByType('resource');
+                            // Look for entries that match the video URL or contain the video ID
+                            const videoEntry = entries.find(e => {
+                                return e.name === video.src ||
+                                       e.name.includes(videoId) ||
+                                       e.name.includes('scl-sensing-garden-videos');
+                            });
+                            if (videoEntry) {
+                                // Use transferSize if available, otherwise use encodedBodySize
+                                const size = videoEntry.transferSize || videoEntry.encodedBodySize || videoEntry.decodedBodySize;
+                                if (size && size > bytesLoaded) {
+                                    bytesLoaded = size;
+                                    const mbLoaded = (bytesLoaded / (1024 * 1024)).toFixed(2);
+                                    console.log(`Real-time bandwidth: ${mbLoaded} MB for ${videoId}`);
+                                }
+                            }
+                        }
+                    };
+
+                    const bandwidthInterval = setInterval(checkBandwidth, 500);
+
+                    video.onseeked = async () => {
+                        clearTimeout(timeout);
+                        clearInterval(bandwidthInterval);
+
+                        // IMMEDIATELY pause and remove src to stop any further downloading
+                        video.pause();
+
+                        // Give it a moment to render
+                        await new Promise(r => setTimeout(r, 100));
+
+                        const thumbnailData = await extractFrameFromVideo(video);
+
+                        // Clear the video source to stop downloading
+                        video.src = '';
+                        video.load();
+
+                        // Get final ACTUAL bandwidth measurement
+                        checkBandwidth();
+
+                        // Log all performance entries for debugging
+                        if (performance.getEntriesByType) {
+                            const entries = performance.getEntriesByType('resource');
+                            const videoEntries = entries.filter(e =>
+                                e.name.includes('amazonaws.com') ||
+                                e.name.includes('scl-sensing-garden')
+                            );
+                            if (videoEntries.length > 0) {
+                                console.log('Found video performance entries:', videoEntries);
+                            }
+                        }
+
+                        // If Performance API didn't work, fall back to buffer estimate
+                        if (bytesLoaded === 0 && video.buffered.length > 0) {
+                            const bufferedEnd = video.buffered.end(video.buffered.length - 1);
+                            const duration = video.duration || 60;
+                            const percentLoaded = (bufferedEnd / duration);
+                            bytesLoaded = videoData.size * percentLoaded;
+                            log(`⚠️ Using buffer estimate for bandwidth measurement (${(bytesLoaded/(1024*1024)).toFixed(2)} MB)`, 'warning');
+                        } else if (bytesLoaded === 0) {
+                            // Fallback to a rough estimate based on preload behavior
+                            bytesLoaded = 1024 * 1024; // Assume ~1MB if we can't measure
+                            log(`⚠️ Could not measure bandwidth, using 1MB estimate`, 'warning');
+                        }
+
+                        // Log bandwidth usage
+                        const mbLoaded = (bytesLoaded / (1024 * 1024)).toFixed(2);
+                        totalBytesDownloaded += bytesLoaded;
+                        const totalMB = (totalBytesDownloaded / (1024 * 1024)).toFixed(2);
+                        log(`📊 Downloaded ${mbLoaded} MB for this video (Total: ${totalMB} MB)`, 'info');
+
+                        if (thumbnailData) {
+                            const updateDb = document.getElementById('updateDbCheckbox').checked;
+                            const uploaded = await uploadThumbnail(videoData.key, thumbnailData, updateDb);
+
+                            if (uploaded) {
+                                log(`✅ Successfully processed ${videoId}`, 'success');
+                                stats.successful++;
+                                resolve(true);
+                            } else {
+                                log(`Failed to upload thumbnail for ${videoId}`, 'error');
+                                stats.failed++;
+                                resolve(false);
+                            }
+                        } else {
+                            log(`Failed to extract frame from ${videoId}`, 'error');
+                            stats.failed++;
+                            resolve(false);
+                        }
+                    };
+
+                    video.onerror = () => {
+                        clearTimeout(timeout);
+                        attempts++;
+                        if (attempts < maxAttempts) {
+                            log(`Error loading ${videoId}, attempt ${attempts}/${maxAttempts}`, 'warning');
+                            tryExtraction();
+                        } else {
+                            log(`Failed to load ${videoId}`, 'error');
+                            stats.failed++;
+                            resolve(false);
+                        }
+                    };
+                };
+
+                tryExtraction();
+            });
+        }
+
+        async function processBatch(batch) {
+            const promises = batch.map(video => processVideo(video));
+            await Promise.all(promises);
+        }
+
+        async function startGeneration() {
+            if (isRunning) return;
+
+            document.getElementById('startBtn').disabled = true;
+            document.getElementById('stopBtn').disabled = false;
+            isRunning = true;
+            currentIndex = 0;
+            stats = { total: 0, processed: 0, successful: 0, failed: 0, skipped: 0 };
+            startTime = Date.now();
+
+            // Fetch videos
+            const fetched = await fetchVideos();
+            if (!fetched) {
+                stopGeneration();
+                return;
+            }
+
+            const batchSize = parseInt(document.getElementById('batchSize').value) || 4;
+            const skipInterval = parseInt(document.getElementById('skipInterval').value) || 1;
+
+            // Filter videos based on skip interval
+            const filteredVideos = videos.filter((_, index) => index % skipInterval === 0);
+            stats.total = filteredVideos.length;
+            log(`📊 Processing every ${skipInterval}${skipInterval === 1 ? 'st' : skipInterval === 2 ? 'nd' : skipInterval === 3 ? 'rd' : 'th'} video: ${filteredVideos.length} of ${videos.length} total`, 'info');
+            updateStats();
+
+            // Process filtered videos in batches
+            let filteredIndex = 0;
+            while (filteredIndex < filteredVideos.length && isRunning) {
+                const batch = filteredVideos.slice(filteredIndex, filteredIndex + batchSize);
+                await processBatch(batch);
+
+                stats.processed += batch.length;
+                filteredIndex += batch.length;
+                updateStats();
+
+                // Small delay between batches
+                if (isRunning && filteredIndex < filteredVideos.length) {
+                    await new Promise(r => setTimeout(r, 500));
+                }
+            }
+
+            if (filteredIndex >= filteredVideos.length) {
+                log('🎉 Generation complete!', 'success');
+            }
+
+            stopGeneration();
+        }
+
+        function stopGeneration() {
+            isRunning = false;
+            document.getElementById('startBtn').disabled = false;
+            document.getElementById('stopBtn').disabled = true;
+            log('Generation stopped', 'warning');
+        }
+
+        // Initialize
+        log('Thumbnail generator ready. Click "Start Generation" to begin.');
+    </script>
+</body>
+</html>
