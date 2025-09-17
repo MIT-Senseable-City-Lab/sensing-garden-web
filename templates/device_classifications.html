@@ -20,7 +20,7 @@
     </div>
     {% set display_fields = fields + ['formatted_time'] if 'formatted_time' not in fields else fields %}
     {{ render_table('classificationsTable', classifications, display_fields,
-    url_for('download_csv', table_type='classifications', device_id=device_id), pagination, limit) }}
+    None, pagination, limit) }}
 </div>
 {% endblock %}
 

@@ -8,7 +8,6 @@
     <h2>Videos for Device {{ device_id }}</h2>
     <div class="mb-3">
         <a href="{{ url_for('view_device', device_id=device_id) }}" class="btn btn-secondary">Back to Device Overview</a>
-        <a href="{{ download_url }}" class="btn btn-secondary ml-2">Download CSV</a>
     </div>
 
     {% if items %}

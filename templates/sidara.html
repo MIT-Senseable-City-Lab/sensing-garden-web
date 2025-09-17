@@ -1,0 +1,744 @@
+{% extends "base.html" %}
+
+{% block title %}Sidara Video Categorization{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <!-- Main Question Header -->
+    <div class="row mb-4">
+        <div class="col-12 text-center">
+            <h1 class="display-4 mb-3">How many hours of footage and what timespan?</h1>
+            <p class="lead text-muted">Interactive video categorization for Sidara devices</p>
+            <div class="version-info text-muted small">Version: 3.0.0 - Thumbnail Display & Shift+Click Range Selection</div>
+        </div>
+    </div>
+
+    <!-- Real-time Statistics Dashboard -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card border-primary">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="mb-0"><i class="fas fa-chart-bar"></i> Real-time Statistics</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row text-center">
+                        <div class="col-md-3">
+                            <div class="stat-box">
+                                <h3 id="real-hours" class="text-success mb-1">0.0</h3>
+                                <p class="mb-0">Hours of "Real" Footage</p>
+                                <small id="real-count" class="text-muted">0 videos</small>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="stat-box">
+                                <h3 id="test-hours" class="text-warning mb-1">0.0</h3>
+                                <p class="mb-0">Hours of "Test" Footage</p>
+                                <small id="test-count" class="text-muted">0 videos</small>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="stat-box">
+                                <h3 id="real-timespan" class="text-info mb-1">-</h3>
+                                <p class="mb-0">"Real" Timespan</p>
+                                <small id="real-timespan-detail" class="text-muted">No data</small>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="stat-box">
+                                <h3 id="test-timespan" class="text-secondary mb-1">-</h3>
+                                <p class="mb-0">"Test" Timespan</p>
+                                <small id="test-timespan-detail" class="text-muted">No data</small>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="row mt-3">
+                        <div class="col-12 text-center">
+                            <div class="progress" style="height: 25px;">
+                                <div id="progress-categorized" class="progress-bar bg-success" role="progressbar" style="width: 0%">
+                                    <span id="progress-text">0% categorized</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Batch Actions -->
+    <div class="row mb-3">
+        <div class="col-12">
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <button id="select-all-visible" class="btn btn-outline-primary">Select All Visible</button>
+                    <button id="clear-selection" class="btn btn-outline-secondary">Clear Selection</button>
+                    <button id="toggle-categorized" class="btn btn-outline-info">Show Categorized</button>
+                    <span id="selected-count" class="badge badge-info ml-2">0 selected</span>
+                </div>
+                <div>
+                    <button id="batch-real" class="btn btn-success" disabled>Mark Selected as Real</button>
+                    <button id="batch-test" class="btn btn-warning" disabled>Mark Selected as Test</button>
+                    <button id="clear-all-data" class="btn btn-outline-danger">Clear All Data</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Keyboard Shortcuts Info -->
+    <div class="row mb-3">
+        <div class="col-12">
+            <div class="alert alert-light">
+                <strong>Keyboard Shortcuts:</strong>
+                <kbd>R</kbd> = Real, <kbd>T</kbd> = Test, <kbd>Space</kbd> = Select, <kbd>A</kbd> = Select All Visible, <kbd>C</kbd> = Clear Selection, <kbd>Shift+Click</kbd> = Range Select
+            </div>
+        </div>
+    </div>
+
+    <!-- Video Grid -->
+    <div class="row" id="video-grid">
+        {% if data and data.videos %}
+            {% for video in data.videos %}
+            <div class="col-lg-3 col-md-4 col-sm-6 mb-4 video-item" data-video-id="{{ video.video_id }}" data-device-id="{{ video.device_id }}" data-timestamp="{{ video.timestamp }}" data-duration="{{ video.duration }}">
+                <div class="card h-100 video-card">
+                    <div class="card-header d-flex justify-content-between align-items-center p-2">
+                        <small class="text-muted">{{ video.device_id[:8] }}...</small>
+                        <div class="categorization-status">
+                            <span class="badge badge-light">Uncategorized</span>
+                        </div>
+                    </div>
+
+                    <!-- Video Thumbnail -->
+                    <div class="video-preview-container position-relative">
+                        {% if video.thumbnail_url %}
+                        <div class="video-thumbnail-wrapper" style="width: 100%; height: 200px; position: relative; cursor: pointer; background: #f0f0f0;" onclick="toggleVideoSelection('{{ video.video_id }}', event)">
+                            <img src="{{ video.thumbnail_url|safe }}"
+                                 style="width: 100%; height: 100%; object-fit: cover;"
+                                 alt="Video thumbnail"
+                                 onerror="this.onerror=null; this.src='{{ video.video_url|safe }}'; this.style.objectFit='contain';">
+                        </div>
+                        {% else %}
+                        <div class="bg-light d-flex align-items-center justify-content-center" style="height: 200px; cursor: pointer;" onclick="toggleVideoSelection('{{ video.video_id }}', event)">
+                            <span class="text-muted">No Video</span>
+                        </div>
+                        {% endif %}
+
+                        <!-- Selection Overlay -->
+                        <div class="selection-overlay position-absolute" style="top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,123,255,0.3); display: none;">
+                            <div class="position-absolute" style="top: 10px; right: 10px;">
+                                <i class="fas fa-check-circle text-white" style="font-size: 24px;"></i>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card-body p-2">
+                        <small class="text-muted d-block mb-2">
+                            {% if video.formatted_time %}
+                                {{ video.formatted_time }}
+                            {% else %}
+                                {{ video.timestamp[:19] if video.timestamp else 'Unknown time' }}
+                            {% endif %}
+                        </small>
+
+                        <!-- Categorization Buttons -->
+                        <div class="btn-group btn-group-sm w-100" role="group">
+                            <button type="button" class="btn btn-outline-success categorize-btn" data-category="real" data-video-id="{{ video.video_id }}">
+                                Real
+                            </button>
+                            <button type="button" class="btn btn-outline-warning categorize-btn" data-category="test" data-video-id="{{ video.video_id }}">
+                                Test
+                            </button>
+                        </div>
+
+                        {% if video.duration %}
+                        <small class="text-muted d-block mt-1">Duration: {{ video.duration }}s</small>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        {% else %}
+        <div class="col-12">
+            <div class="alert alert-info text-center">
+                <h5>No videos found</h5>
+                <p>No videos were found for the Sidara devices. Check device connectivity and data availability.</p>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Load More Button -->
+    {% if data and data.total_videos > data.displayed_videos %}
+    <div class="row mt-4 mb-4">
+        <div class="col-12 text-center">
+            <button class="btn btn-primary btn-lg" id="load-more-btn" onclick="loadMoreVideos()">
+                <i class="fas fa-plus-circle"></i> Load More Videos
+                <span id="videos-remaining">({{ data.total_videos - data.displayed_videos }} remaining)</span>
+            </button>
+            <div id="loading-more" class="spinner-border text-primary mt-3" style="display: none;" role="status">
+                <span class="sr-only">Loading...</span>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+<style>
+.stat-box {
+    padding: 1rem;
+    border-left: 4px solid #007bff;
+    background: #f8f9fa;
+    margin-bottom: 1rem;
+}
+
+.video-card {
+    transition: all 0.2s ease;
+    cursor: pointer;
+}
+
+.video-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+
+.video-card.selected {
+    border: 2px solid #007bff;
+    box-shadow: 0 0 0 0.2rem rgba(0,123,255,0.25);
+}
+
+.video-card.categorized-real {
+    border-left: 4px solid #28a745;
+}
+
+.video-card.categorized-test {
+    border-left: 4px solid #ffc107;
+}
+
+.video-thumbnail {
+    transition: opacity 0.2s ease;
+}
+
+.video-thumbnail:hover {
+    opacity: 0.8;
+}
+
+.categorize-btn.active {
+    font-weight: bold;
+}
+
+.selection-overlay {
+    pointer-events: none;
+}
+
+kbd {
+    padding: 0.2rem 0.4rem;
+    font-size: 0.875em;
+    color: #fff;
+    background-color: #212529;
+    border-radius: 0.2rem;
+}
+</style>
+
+<script>
+// Global variables
+let categorizedVideos = {};
+let selectedVideos = new Set();
+let allVideos = [];
+let hideCategorizeds = true; // Hide categorized videos by default
+let frameCache = {}; // Move frameCache to global scope
+let currentOffset = {{ data.displayed_videos if data else 0 }};
+const devices = {{ data.devices | tojson if data and data.devices else '[]' }};
+let lastSelectedVideoId = null; // Track last selected video for range selection
+
+// Initialize on page load
+document.addEventListener('DOMContentLoaded', function() {
+    initializeVideoCategorization();
+    setupKeyboardShortcuts();
+    setupBatchActions();
+    loadVideoData();
+});
+
+function initializeVideoCategorization() {
+    // Load existing categorization data from localStorage
+    const savedData = localStorage.getItem('sidara_categorization');
+    if (savedData) {
+        try {
+            categorizedVideos = JSON.parse(savedData);
+            console.log('Loaded categorization data:', categorizedVideos);
+        } catch (e) {
+            console.error('Error loading categorization data:', e);
+            categorizedVideos = {};
+        }
+    }
+
+    // Apply saved categorizations to UI
+    updateVideoDisplays();
+    updateStatistics();
+}
+
+function loadVideoData() {
+    // Extract video data from the rendered template
+    allVideos = [];
+    document.querySelectorAll('.video-item').forEach(item => {
+        const video = {
+            video_id: item.dataset.videoId,
+            device_id: item.dataset.deviceId,
+            timestamp: item.dataset.timestamp,
+            duration: parseFloat(item.dataset.duration) || 0
+        };
+        allVideos.push(video);
+    });
+
+    console.log('Loaded video data:', allVideos.length, 'videos');
+}
+
+function updateVideoDisplays() {
+    document.querySelectorAll('.video-item').forEach(item => {
+        const videoId = item.dataset.videoId;
+        const category = categorizedVideos[videoId];
+        const card = item.querySelector('.video-card');
+        const statusBadge = item.querySelector('.categorization-status .badge');
+        const buttons = item.querySelectorAll('.categorize-btn');
+
+        // Reset classes
+        card.classList.remove('categorized-real', 'categorized-test');
+        buttons.forEach(btn => btn.classList.remove('active'));
+
+        if (category) {
+            // Hide categorized videos if option is enabled
+            if (hideCategorizeds) {
+                item.style.display = 'none';
+            } else {
+                item.style.display = '';
+            }
+
+            card.classList.add(`categorized-${category}`);
+            statusBadge.textContent = category.charAt(0).toUpperCase() + category.slice(1);
+            statusBadge.className = `badge badge-${category === 'real' ? 'success' : 'warning'}`;
+
+            // Activate the appropriate button
+            const activeButton = item.querySelector(`[data-category="${category}"]`);
+            if (activeButton) {
+                activeButton.classList.add('active');
+            }
+        } else {
+            item.style.display = '';
+            statusBadge.textContent = 'Uncategorized';
+            statusBadge.className = 'badge badge-light';
+        }
+    });
+}
+
+function categorizeVideo(videoId, category) {
+    categorizedVideos[videoId] = category;
+    saveCategorizationData();
+    updateVideoDisplays();
+    updateStatistics();
+    console.log(`Categorized ${videoId} as ${category}`);
+}
+
+function saveCategorizationData() {
+    try {
+        localStorage.setItem('sidara_categorization', JSON.stringify(categorizedVideos));
+    } catch (e) {
+        console.error('Error saving categorization data:', e);
+    }
+}
+
+// Load more videos function
+async function loadMoreVideos() {
+    const loadMoreBtn = document.getElementById('load-more-btn');
+    const loadingSpinner = document.getElementById('loading-more');
+
+    if (loadMoreBtn) loadMoreBtn.style.display = 'none';
+    if (loadingSpinner) loadingSpinner.style.display = 'inline-block';
+
+    try {
+        // Load videos from each device
+        for (const deviceId of devices) {
+            const response = await fetch(`/sidara/load-more-videos?device_id=${deviceId}&offset=${Math.floor(currentOffset/3)}&limit=100`);
+            const data = await response.json();
+
+            if (data.videos && data.videos.length > 0) {
+                // Add new video cards to the grid
+                const grid = document.getElementById('video-grid');
+                data.videos.forEach(video => {
+                    // Skip if already categorized and we're hiding them
+                    if (hideCategorizeds && categorizedVideos[video.video_id]) {
+                        console.log(`Skipping already categorized video: ${video.video_id}`);
+                        return;
+                    }
+
+                    const videoCard = createVideoCard(video);
+                    grid.insertAdjacentHTML('beforeend', videoCard);
+                });
+
+                currentOffset += data.videos.length;
+            }
+        }
+
+        // No video preview initialization needed anymore
+
+        // Update remaining count
+        const totalVideos = {{ data.total_videos if data else 0 }};
+        const remaining = totalVideos - currentOffset;
+
+        if (remaining > 0 && document.getElementById('videos-remaining')) {
+            document.getElementById('videos-remaining').textContent = `(${remaining} remaining)`;
+            if (loadMoreBtn) loadMoreBtn.style.display = 'inline-block';
+        }
+
+    } catch (error) {
+        console.error('Error loading more videos:', error);
+        alert('Failed to load more videos. Please try again.');
+        if (loadMoreBtn) loadMoreBtn.style.display = 'inline-block';
+    } finally {
+        if (loadingSpinner) loadingSpinner.style.display = 'none';
+    }
+}
+
+// Create video card HTML
+function createVideoCard(video) {
+    const thumbnailHtml = video.thumbnail_url ? `
+        <img src="${video.thumbnail_url}"
+             style="width: 100%; height: 200px; object-fit: cover;"
+             alt="Video thumbnail"
+             onerror="this.onerror=null; this.src='${video.video_url}'; this.style.objectFit='contain';">
+    ` : video.video_url ? `
+        <img src="${video.video_url}"
+             style="width: 100%; height: 200px; object-fit: contain;"
+             alt="Video fallback">
+    ` : `
+        <div class="bg-light d-flex align-items-center justify-content-center" style="height: 200px;">
+            <span class="text-muted">No Video</span>
+        </div>
+    `;
+
+    return `
+    <div class="col-lg-3 col-md-4 col-sm-6 mb-4 video-item" data-video-id="${video.video_id}" data-device-id="${video.device_id}" data-timestamp="${video.timestamp}" data-duration="${video.duration || 0}">
+        <div class="card h-100 video-card">
+            <div class="card-header d-flex justify-content-between align-items-center p-2">
+                <small class="text-muted">${video.device_id.substring(0, 8)}...</small>
+                <div class="categorization-status">
+                    <span class="badge badge-light">Uncategorized</span>
+                </div>
+            </div>
+            <div class="position-relative video-thumbnail" style="height: 200px; overflow: hidden; cursor: pointer;" onclick="toggleVideoSelection('${video.video_id}', event)">
+                ${thumbnailHtml}
+                <div class="selection-overlay position-absolute" style="top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,123,255,0.3); display: none;">
+                    <div class="position-absolute" style="top: 10px; right: 10px;">
+                        <i class="fas fa-check-circle text-white" style="font-size: 24px;"></i>
+                    </div>
+                </div>
+            </div>
+            <div class="card-body p-2">
+                <small class="text-muted d-block mb-2">
+                    ${video.formatted_time || (video.timestamp ? video.timestamp.substring(0, 19) : 'Unknown time')}
+                </small>
+                <div class="btn-group btn-group-sm w-100" role="group">
+                    <button class="btn btn-outline-success" onclick="categorizeVideo('${video.video_id}', 'real')">
+                        <i class="fas fa-check"></i> Real
+                    </button>
+                    <button class="btn btn-outline-warning" onclick="categorizeVideo('${video.video_id}', 'test')">
+                        <i class="fas fa-flask"></i> Test
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+    `;
+}
+
+// Initialize event handlers for newly loaded videos
+// initializeNewVideos function removed - no longer needed with static thumbnails
+
+function updateStatistics() {
+    const realVideos = [];
+    const testVideos = [];
+
+    // Collect categorized videos with their data
+    allVideos.forEach(video => {
+        const category = categorizedVideos[video.video_id];
+        if (category === 'real') {
+            realVideos.push(video);
+        } else if (category === 'test') {
+            testVideos.push(video);
+        }
+    });
+
+    // Calculate hours
+    const realHours = realVideos.reduce((sum, video) => sum + video.duration, 0) / 3600;
+    const testHours = testVideos.reduce((sum, video) => sum + video.duration, 0) / 3600;
+
+    // Calculate timespans
+    const realTimespan = calculateTimespan(realVideos);
+    const testTimespan = calculateTimespan(testVideos);
+
+    // Update UI
+    document.getElementById('real-hours').textContent = realHours.toFixed(1);
+    document.getElementById('test-hours').textContent = testHours.toFixed(1);
+    document.getElementById('real-count').textContent = `${realVideos.length} videos`;
+    document.getElementById('test-count').textContent = `${testVideos.length} videos`;
+
+    // Update timespan displays
+    updateTimespanDisplay('real', realTimespan, realVideos.length);
+    updateTimespanDisplay('test', testTimespan, testVideos.length);
+
+    // Update progress
+    const totalVideos = allVideos.length;
+    const categorizedCount = Object.keys(categorizedVideos).length;
+    const progressPercent = totalVideos > 0 ? (categorizedCount / totalVideos * 100) : 0;
+
+    document.getElementById('progress-categorized').style.width = `${progressPercent}%`;
+    document.getElementById('progress-text').textContent = `${Math.round(progressPercent)}% categorized (${categorizedCount}/${totalVideos})`;
+}
+
+function calculateTimespan(videos) {
+    if (videos.length === 0) return null;
+
+    const timestamps = videos.map(v => new Date(v.timestamp)).filter(d => !isNaN(d));
+    if (timestamps.length === 0) return null;
+
+    timestamps.sort((a, b) => a - b);
+    const earliest = timestamps[0];
+    const latest = timestamps[timestamps.length - 1];
+
+    return {
+        earliest: earliest,
+        latest: latest,
+        days: Math.ceil((latest - earliest) / (1000 * 60 * 60 * 24))
+    };
+}
+
+function updateTimespanDisplay(type, timespan, videoCount) {
+    const timespanElement = document.getElementById(`${type}-timespan`);
+    const detailElement = document.getElementById(`${type}-timespan-detail`);
+
+    if (timespan && videoCount > 0) {
+        timespanElement.textContent = `${timespan.days} days`;
+        detailElement.textContent = `${timespan.earliest.toLocaleDateString()} - ${timespan.latest.toLocaleDateString()}`;
+    } else {
+        timespanElement.textContent = '-';
+        detailElement.textContent = 'No data';
+    }
+}
+
+function toggleVideoSelection(videoId, event = null) {
+    const item = document.querySelector(`[data-video-id="${videoId}"]`);
+    const card = item.querySelector('.video-card');
+    const overlay = item.querySelector('.selection-overlay');
+
+    // Handle shift+click for range selection
+    if (event && event.shiftKey && lastSelectedVideoId && lastSelectedVideoId !== videoId) {
+        selectVideoRange(lastSelectedVideoId, videoId);
+        return;
+    }
+
+    if (selectedVideos.has(videoId)) {
+        selectedVideos.delete(videoId);
+        card.classList.remove('selected');
+        overlay.style.display = 'none';
+        // If we're deselecting the last selected video, clear the reference
+        if (lastSelectedVideoId === videoId) {
+            lastSelectedVideoId = null;
+        }
+    } else {
+        selectedVideos.add(videoId);
+        card.classList.add('selected');
+        overlay.style.display = 'block';
+        lastSelectedVideoId = videoId;
+    }
+
+    updateSelectionUI();
+}
+
+function selectVideoRange(fromVideoId, toVideoId) {
+    // Get all visible video items in DOM order
+    const allVideoItems = Array.from(document.querySelectorAll('.video-item'));
+    const fromIndex = allVideoItems.findIndex(item => item.dataset.videoId === fromVideoId);
+    const toIndex = allVideoItems.findIndex(item => item.dataset.videoId === toVideoId);
+
+    if (fromIndex === -1 || toIndex === -1) return;
+
+    // Determine the range (inclusive)
+    const startIndex = Math.min(fromIndex, toIndex);
+    const endIndex = Math.max(fromIndex, toIndex);
+
+    // Select all videos in the range
+    for (let i = startIndex; i <= endIndex; i++) {
+        const videoId = allVideoItems[i].dataset.videoId;
+        const item = allVideoItems[i];
+        const card = item.querySelector('.video-card');
+        const overlay = item.querySelector('.selection-overlay');
+
+        if (!selectedVideos.has(videoId)) {
+            selectedVideos.add(videoId);
+            card.classList.add('selected');
+            overlay.style.display = 'block';
+        }
+    }
+
+    // Update the last selected video to the clicked one
+    lastSelectedVideoId = toVideoId;
+    updateSelectionUI();
+}
+
+function updateSelectionUI() {
+    document.getElementById('selected-count').textContent = `${selectedVideos.size} selected`;
+
+    const batchButtons = document.querySelectorAll('#batch-real, #batch-test');
+    batchButtons.forEach(btn => {
+        btn.disabled = selectedVideos.size === 0;
+    });
+}
+
+function setupKeyboardShortcuts() {
+    document.addEventListener('keydown', function(e) {
+        // Only process shortcuts when not typing in input fields
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+        switch(e.key.toLowerCase()) {
+            case 'r':
+                e.preventDefault();
+                if (selectedVideos.size > 0) {
+                    batchCategorize('real');
+                }
+                break;
+            case 't':
+                e.preventDefault();
+                if (selectedVideos.size > 0) {
+                    batchCategorize('test');
+                }
+                break;
+            case ' ':
+                e.preventDefault();
+                // Select first visible uncategorized video if none selected
+                if (selectedVideos.size === 0) {
+                    const firstUncategorized = document.querySelector('.video-item:not(.categorized-real):not(.categorized-test)');
+                    if (firstUncategorized) {
+                        toggleVideoSelection(firstUncategorized.dataset.videoId);
+                    }
+                }
+                break;
+            case 'a':
+                e.preventDefault();
+                selectAllVisible();
+                break;
+            case 'c':
+                e.preventDefault();
+                clearSelection();
+                break;
+        }
+    });
+}
+
+function setupBatchActions() {
+    // Categorization buttons
+    document.querySelectorAll('.categorize-btn').forEach(btn => {
+        btn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            const videoId = this.dataset.videoId;
+            const category = this.dataset.category;
+            categorizeVideo(videoId, category);
+        });
+    });
+
+    // Batch action buttons
+    document.getElementById('select-all-visible').addEventListener('click', selectAllVisible);
+    document.getElementById('clear-selection').addEventListener('click', clearSelection);
+    document.getElementById('batch-real').addEventListener('click', () => batchCategorize('real'));
+    document.getElementById('batch-test').addEventListener('click', () => batchCategorize('test'));
+    document.getElementById('clear-all-data').addEventListener('click', clearAllData);
+
+    // Toggle categorized videos visibility
+    document.getElementById('toggle-categorized').addEventListener('click', function() {
+        hideCategorizeds = !hideCategorizeds;
+        this.textContent = hideCategorizeds ? 'Show Categorized' : 'Hide Categorized';
+        this.className = hideCategorizeds ? 'btn btn-outline-info' : 'btn btn-info';
+        updateVideoDisplays();
+
+        // Update statistics to show current state
+        const hiddenCount = Object.keys(categorizedVideos).length;
+        if (hideCategorizeds && hiddenCount > 0) {
+            console.log(`Hiding ${hiddenCount} categorized videos`);
+        }
+    });
+}
+
+function selectAllVisible() {
+    document.querySelectorAll('.video-item').forEach(item => {
+        const videoId = item.dataset.videoId;
+        if (!selectedVideos.has(videoId)) {
+            toggleVideoSelection(videoId);
+        }
+    });
+}
+
+function clearSelection() {
+    selectedVideos.forEach(videoId => {
+        const item = document.querySelector(`[data-video-id="${videoId}"]`);
+        if (item) {
+            const card = item.querySelector('.video-card');
+            const overlay = item.querySelector('.selection-overlay');
+            card.classList.remove('selected');
+            overlay.style.display = 'none';
+        }
+    });
+    selectedVideos.clear();
+    updateSelectionUI();
+}
+
+function batchCategorize(category) {
+    selectedVideos.forEach(videoId => {
+        categorizeVideo(videoId, category);
+    });
+    clearSelection();
+}
+
+function clearAllData() {
+    // First confirmation
+    if (!confirm('⚠️ WARNING: This will clear ALL categorization data!\n\nAre you sure you want to continue?')) {
+        return;
+    }
+
+    // Second confirmation with details
+    const totalCategorized = Object.keys(categorizedVideos).length;
+    const totalCached = Object.keys(frameCache).length;
+
+    const message = `🚨 FINAL CONFIRMATION 🚨\n\n` +
+                    `This will permanently delete:\n` +
+                    `• ${totalCategorized} video categorizations\n` +
+                    `• ${totalCached} cached video frames\n\n` +
+                    `Type "DELETE" to confirm:`;
+
+    const userInput = prompt(message);
+
+    if (userInput === 'DELETE') {
+        // Clear categorization data
+        categorizedVideos = {};
+        localStorage.removeItem('sidara_categorization');
+
+        // Also clear frame cache
+        frameCache = {};
+        localStorage.removeItem('sidara_frame_cache');
+
+        updateVideoDisplays();
+        updateStatistics();
+        clearSelection();
+
+        console.log('✅ All data cleared successfully');
+        alert('All data has been cleared. Page will refresh.');
+        location.reload();
+    } else {
+        console.log('❌ Clear operation cancelled');
+        alert('Clear operation cancelled - your data is safe.');
+    }
+}
+
+// Video thumbnails are now loaded directly from S3/DynamoDB - no complex preview system needed
+
+// No frame caching needed - using static thumbnails from S3
+
+// Removed complex video preview and caching system - now using simple thumbnails
+
+</script>
+{% endblock %}
