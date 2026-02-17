@@ -10,6 +10,8 @@ from flask import (Flask, jsonify, make_response, redirect, render_template,
                   request, url_for)
 import requests
 from sensing_garden_client import SensingGardenClient
+import boto3
+from collections import defaultdict
 
 # Load environment variables
 load_dotenv()
@@ -103,6 +105,18 @@ def get_field_names(items: List[Dict]) -> List[str]:
     # Get all keys from the first item
     return list(items[0].keys()) if items else []
 
+def _get_device_ids():
+    """Extract device ID strings from client.get_devices(), handling tuple responses."""
+    try:
+        devices_tuple = client.get_devices()
+        devices = devices_tuple[0] if isinstance(devices_tuple, tuple) else devices_tuple
+        if devices and isinstance(devices, list):
+            return [d['device_id'] if isinstance(d, dict) and 'device_id' in d else d for d in devices]
+        return []
+    except Exception:
+        return []
+
+
 @app.route('/health')
 def health_check():
     """Enhanced health check endpoint for AWS App Runner
@@ -129,17 +143,7 @@ def health_check():
 
 @app.route('/')
 def index():
-    try:
-        devices_tuple = client.get_devices()
-        print('DEBUG: client.get_devices() returned:', devices_tuple)
-        devices = devices_tuple[0] if isinstance(devices_tuple, tuple) else devices_tuple
-        # If get_devices() returns a list of dicts with 'device_id', extract them
-        if devices and isinstance(devices, list):
-            device_ids = [d['device_id'] if isinstance(d, dict) and 'device_id' in d else d for d in devices]
-        else:
-            device_ids = []
-    except Exception as e:
-        device_ids = []
+    device_ids = _get_device_ids()
     return render_template('index.html', device_ids=device_ids)
 
 
@@ -905,6 +909,150 @@ def delete_device(device_id):
             'success': False,
             'error': str(e)
         }), 500
+
+@app.route('/admin')
+def admin():
+    """Admin dashboard for data oversight."""
+    device_ids = _get_device_ids()
+    return render_template('admin.html', device_ids=device_ids)
+
+@app.route('/api/admin/device-summary')
+def admin_device_summary():
+    """Get summary stats for all devices."""
+    device_ids = _get_device_ids()
+    devices = {}
+    for did in device_ids:
+        try:
+            total = client.videos.count(device_id=did)
+            oldest_ts = None
+            newest_ts = None
+            try:
+                oldest_resp = client.videos.fetch(device_id=did, limit=1, sort_desc=False)
+                if oldest_resp.get('items'):
+                    oldest_ts = oldest_resp['items'][0].get('timestamp')
+            except Exception:
+                pass
+            try:
+                newest_resp = client.videos.fetch(device_id=did, limit=1, sort_desc=True)
+                if newest_resp.get('items'):
+                    newest_ts = newest_resp['items'][0].get('timestamp')
+            except Exception:
+                pass
+            devices[did] = {
+                'total_videos': total,
+                'oldest_timestamp': oldest_ts,
+                'newest_timestamp': newest_ts,
+            }
+        except Exception as e:
+            devices[did] = {'error': str(e)}
+    return jsonify({'devices': devices})
+
+@app.route('/api/admin/video-counts')
+def admin_video_counts():
+    """Get video counts per day for a device (or all devices)."""
+    device_id = request.args.get('device_id')
+    device_ids = [device_id] if device_id else _get_device_ids()
+    result = {}
+    for did in device_ids:
+        counts = defaultdict(int)
+        next_token = None
+        while True:
+            try:
+                resp = client.videos.fetch(device_id=did, limit=500, next_token=next_token, sort_desc=True)
+                for item in resp.get('items', []):
+                    ts = item.get('timestamp', '')
+                    date = ts[:10] if len(ts) >= 10 else 'unknown'
+                    counts[date] += 1
+                next_token = resp.get('next_token')
+                if not next_token:
+                    break
+            except Exception as e:
+                print(f"Error fetching videos for {did}: {e}")
+                break
+        result[did] = dict(sorted(counts.items()))
+    return jsonify(result)
+
+@app.route('/api/admin/s3-orphans')
+def admin_s3_orphans():
+    """Scan S3 for video files not registered in DynamoDB."""
+    try:
+        s3 = boto3.client(
+            's3',
+            aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'),
+            aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY'),
+            region_name=os.getenv('AWS_REGION', 'us-east-1'),
+        )
+        dynamodb = boto3.resource(
+            'dynamodb',
+            aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'),
+            aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY'),
+            region_name=os.getenv('AWS_REGION', 'us-east-1'),
+        )
+        table = dynamodb.Table('sensing-garden-videos')
+        bucket = 'scl-sensing-garden-videos'
+
+        # List all .mp4 files under videos/ prefix
+        s3_files = []
+        paginator = s3.get_paginator('list_objects_v2')
+        for page in paginator.paginate(Bucket=bucket, Prefix='videos/'):
+            for obj in page.get('Contents', []):
+                key = obj['Key']
+                if key.endswith('.mp4'):
+                    s3_files.append({
+                        'key': key,
+                        'size': obj['Size'],
+                        'last_modified': obj['LastModified'].isoformat(),
+                    })
+
+        # Scan DynamoDB for all known video keys and compare directly
+        db_keys = set()
+        scan_kwargs = {'ProjectionExpression': 'video_key'}
+        try:
+            while True:
+                response = table.scan(**scan_kwargs)
+                for item in response.get('Items', []):
+                    if 'video_key' in item:
+                        db_keys.add(item['video_key'])
+                if 'LastEvaluatedKey' not in response:
+                    break
+                scan_kwargs['ExclusiveStartKey'] = response['LastEvaluatedKey']
+        except Exception as e:
+            print(f"Error scanning DynamoDB: {e}")
+            return jsonify({'error': f'DynamoDB scan failed: {e}'}), 500
+
+        orphans = [f for f in s3_files if f['key'] not in db_keys]
+
+        return jsonify({
+            'total_s3_files': len(s3_files),
+            'orphan_count': len(orphans),
+            'orphans': orphans[:500],  # Limit response size
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/admin/s3-presign')
+def admin_s3_presign():
+    """Generate a presigned URL for an S3 video key."""
+    key = request.args.get('key')
+    if not key:
+        return jsonify({'error': 'key parameter required'}), 400
+    if not key.startswith('videos/') or not key.endswith('.mp4'):
+        return jsonify({'error': 'Invalid key'}), 400
+    try:
+        s3 = boto3.client(
+            's3',
+            aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'),
+            aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY'),
+            region_name=os.getenv('AWS_REGION', 'us-east-1'),
+        )
+        url = s3.generate_presigned_url(
+            'get_object',
+            Params={'Bucket': 'scl-sensing-garden-videos', 'Key': key},
+            ExpiresIn=3600,
+        )
+        return jsonify({'url': url})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
     # Get port from environment variable or default to 8080

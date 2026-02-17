@@ -242,7 +242,7 @@ document.getElementById('run-orphan-check').addEventListener('click', function()
         if (data.orphans && data.orphans.length > 0) {
             html += '<table class="table table-sm table-bordered table-striped"><thead><tr><th>Key</th><th>Size (bytes)</th><th>Last Modified</th></tr></thead><tbody>';
             data.orphans.forEach(function(o) {
-                html += '<tr><td class="text-truncate" style="max-width:400px" title="' + o.key + '">' + o.key + '</td><td>' + o.size + '</td><td>' + o.last_modified + '</td></tr>';
+                html += '<tr><td class="text-truncate" style="max-width:400px" title="' + o.key + '"><a href="#" class="orphan-view-link" data-key="' + o.key + '">' + o.key + '</a></td><td>' + o.size + '</td><td>' + o.last_modified + '</td></tr>';
             });
             html += '</tbody></table>';
             if (data.orphan_count > 500) {
@@ -250,6 +250,20 @@ document.getElementById('run-orphan-check').addEventListener('click', function()
             }
         }
         container.innerHTML = html;
+        container.addEventListener('click', function(e) {
+            var link = e.target.closest('.orphan-view-link');
+            if (!link) return;
+            e.preventDefault();
+            link.textContent = 'Opening...';
+            fetch('/api/admin/s3-presign?key=' + encodeURIComponent(link.getAttribute('data-key')))
+                .then(function(r) { return r.json(); })
+                .then(function(d) {
+                    if (d.url) { window.open(d.url, '_blank'); }
+                    else { alert('Error: ' + (d.error || 'Unknown error')); }
+                    link.textContent = link.getAttribute('data-key');
+                })
+                .catch(function(err) { alert('Request failed: ' + err); link.textContent = link.getAttribute('data-key'); });
+        });
         statusEl.textContent = 'Complete';
     }, btn);
 });
