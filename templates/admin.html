@@ -1,0 +1,257 @@
+{% extends 'base.html' %}
+
+{% block title %}Admin Dashboard - Sensing Garden{% endblock %}
+
+{% block content %}
+<h2 class="mb-4">Admin Dashboard</h2>
+
+<ul class="nav nav-tabs" id="adminTabs" role="tablist">
+    <li class="nav-item">
+        <a class="nav-link active" id="counts-tab" data-toggle="tab" href="#counts-pane" role="tab">Video Counts</a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link" id="summary-tab" data-toggle="tab" href="#summary-pane" role="tab">Device Summary</a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link" id="orphans-tab" data-toggle="tab" href="#orphans-pane" role="tab">S3 Orphans</a>
+    </li>
+</ul>
+
+<div class="tab-content pt-3" id="adminTabContent">
+    <!-- Tab 1: Video Counts Per Day -->
+    <div class="tab-pane fade show active" id="counts-pane" role="tabpanel">
+        <div class="form-inline mb-3">
+            <label class="mr-2" for="device-filter">Device:</label>
+            <select id="device-filter" class="form-control mr-2">
+                <option value="">All Devices</option>
+                {% for did in device_ids %}
+                <option value="{{ did }}">{{ did }}</option>
+                {% endfor %}
+            </select>
+            <button id="load-counts-btn" class="btn btn-primary">Load Counts</button>
+            <span id="counts-status" class="ml-3 text-muted small"></span>
+        </div>
+        <div id="counts-chart-container">
+            <p class="text-muted">Select a device and click "Load Counts" to view daily video counts.</p>
+        </div>
+    </div>
+
+    <!-- Tab 2: Device Summary -->
+    <div class="tab-pane fade" id="summary-pane" role="tabpanel">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <span id="summary-status" class="text-muted small">Loading...</span>
+        </div>
+        <div id="device-summary" class="row">
+            <div class="col-12 text-center">
+                <div class="spinner-border text-success" role="status"><span class="sr-only">Loading...</span></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Tab 3: S3 Orphan Detection -->
+    <div class="tab-pane fade" id="orphans-pane" role="tabpanel">
+        <button id="run-orphan-check" class="btn btn-primary mb-3">Run Orphan Check</button>
+        <span id="orphan-status" class="ml-3 text-muted small"></span>
+        <div id="orphan-results"></div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
+<script>
+// ---- Shared Utilities ----
+function showSpinner(container) {
+    container.innerHTML = '<div class="text-center"><div class="spinner-border text-success" role="status"><span class="sr-only">Loading...</span></div></div>';
+}
+
+function showError(container, statusEl, err) {
+    container.innerHTML = '<div class="alert alert-danger">Error: ' + err + '</div>';
+    if (statusEl) statusEl.textContent = 'Error';
+}
+
+async function fetchJSON(url, container, statusEl, onSuccess, btn) {
+    if (btn) btn.disabled = true;
+    showSpinner(container);
+    if (statusEl) statusEl.textContent = 'Loading...';
+    try {
+        const r = await fetch(url);
+        const data = await r.json();
+        onSuccess(data);
+    } catch (err) {
+        showError(container, statusEl, err);
+    } finally {
+        if (btn) btn.disabled = false;
+    }
+}
+
+// ---- Device Summary ----
+(function() {
+    const container = document.getElementById('device-summary');
+    const statusEl = document.getElementById('summary-status');
+    fetchJSON('/api/admin/device-summary', container, statusEl, function(data) {
+        const devices = data.devices || {};
+        const ids = Object.keys(devices);
+        if (!ids.length) {
+            container.innerHTML = '<div class="col-12"><p class="text-muted">No devices found.</p></div>';
+            statusEl.textContent = '';
+            return;
+        }
+        let html = '';
+        ids.forEach(function(id) {
+            const d = devices[id];
+            if (d.error) {
+                html += '<div class="col-md-4 mb-3"><div class="card border-danger"><div class="card-body"><h6 class="card-title text-truncate" title="' + id + '">' + id + '</h6><p class="text-danger">' + d.error + '</p></div></div></div>';
+                return;
+            }
+            html += '<div class="col-md-4 mb-3"><div class="card"><div class="card-body">' +
+                '<h6 class="card-title text-truncate" title="' + id + '">' + id + '</h6>' +
+                '<p class="mb-1"><strong>Total Videos:</strong> ' + d.total_videos + '</p>' +
+                '<p class="mb-1"><small>Oldest: ' + (d.oldest_timestamp || 'N/A') + '</small></p>' +
+                '<p class="mb-0"><small>Newest: ' + (d.newest_timestamp || 'N/A') + '</small></p>' +
+                '</div></div></div>';
+        });
+        container.innerHTML = html;
+        statusEl.textContent = ids.length + ' device(s)';
+    });
+})();
+
+// ---- Video Counts Per Day (Bar Chart) ----
+var countsChart = null;
+
+document.getElementById('load-counts-btn').addEventListener('click', function() {
+    var btn = this;
+    var deviceId = document.getElementById('device-filter').value;
+    var statusEl = document.getElementById('counts-status');
+    var container = document.getElementById('counts-chart-container');
+
+    var url = '/api/admin/video-counts';
+    if (deviceId) url += '?device_id=' + encodeURIComponent(deviceId);
+
+    fetchJSON(url, container, statusEl, function(data) {
+        var deviceIds = Object.keys(data);
+        if (!deviceIds.length) {
+            container.innerHTML = '<p class="text-muted">No data found.</p>';
+            statusEl.textContent = '';
+            return;
+        }
+
+        // Collect all dates sorted chronologically
+        var allDates = new Set();
+        deviceIds.forEach(function(did) {
+            Object.keys(data[did]).forEach(function(date) { allDates.add(date); });
+        });
+        var dates = Array.from(allDates).sort();
+
+        // Format date labels: "Apr 23", "May 06"
+        var labels = dates.map(function(d) {
+            var parts = d.split('-');
+            var dt = new Date(parts[0], parts[1] - 1, parts[2]);
+            return dt.toLocaleDateString('en-US', { month: 'short', day: '2-digit' });
+        });
+
+        // Color function: red >200, yellow 50-200, teal <50
+        function barColor(count) {
+            if (count > 200) return '#dc3545';
+            if (count >= 50) return '#ffc107';
+            return '#20c997';
+        }
+
+        var datasets;
+        var totalVideos = 0;
+
+        if (deviceIds.length === 1) {
+            // Single device: per-bar coloring
+            var did = deviceIds[0];
+            var counts = dates.map(function(date) { return (data[did] && data[did][date]) || 0; });
+            counts.forEach(function(c) { totalVideos += c; });
+            datasets = [{
+                label: did,
+                data: counts,
+                backgroundColor: counts.map(barColor),
+                borderWidth: 0
+            }];
+        } else {
+            // Multiple devices: one color per device, grouped bars
+            var palette = ['#20c997', '#007bff', '#dc3545', '#ffc107', '#6f42c1', '#fd7e14', '#17a2b8', '#6c757d'];
+            datasets = deviceIds.map(function(did, i) {
+                var counts = dates.map(function(date) { return (data[did] && data[did][date]) || 0; });
+                counts.forEach(function(c) { totalVideos += c; });
+                return {
+                    label: did,
+                    data: counts,
+                    backgroundColor: palette[i % palette.length],
+                    borderWidth: 0
+                };
+            });
+        }
+
+        // Build chart container
+        container.innerHTML = '<canvas id="counts-canvas"></canvas><p class="text-muted mt-2" id="counts-summary"></p>';
+        document.getElementById('counts-summary').textContent = totalVideos + ' total videos across ' + dates.length + ' recording days';
+        statusEl.textContent = dates.length + ' days, ' + deviceIds.length + ' device(s)';
+
+        if (countsChart) { countsChart.destroy(); countsChart = null; }
+
+        var ctx = document.getElementById('counts-canvas').getContext('2d');
+        countsChart = new Chart(ctx, {
+            type: 'bar',
+            data: { labels: labels, datasets: datasets },
+            plugins: [ChartDataLabels],
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    datalabels: {
+                        anchor: 'end',
+                        align: 'top',
+                        font: { size: 10 },
+                        formatter: function(value) { return value > 0 ? value : ''; }
+                    },
+                    legend: { display: deviceIds.length > 1 }
+                },
+                scales: {
+                    x: { ticks: { maxRotation: 90, minRotation: 45 } },
+                    y: { beginAtZero: true }
+                }
+            }
+        });
+
+        // Set a reasonable height based on data
+        document.getElementById('counts-canvas').parentElement.style.height = '500px';
+        document.getElementById('counts-canvas').style.height = '500px';
+        countsChart.resize();
+    }, btn);
+});
+
+// ---- S3 Orphan Check ----
+document.getElementById('run-orphan-check').addEventListener('click', function() {
+    var btn = this;
+    var statusEl = document.getElementById('orphan-status');
+    var container = document.getElementById('orphan-results');
+    statusEl.textContent = 'Scanning S3 and checking DynamoDB... (this may take a while)';
+
+    fetchJSON('/api/admin/s3-orphans', container, statusEl, function(data) {
+        if (data.error) {
+            container.innerHTML = '<div class="alert alert-danger">Error: ' + data.error + '</div>';
+            statusEl.textContent = 'Error';
+            return;
+        }
+        var html = '<div class="alert alert-info">Total S3 files: <strong>' + data.total_s3_files + '</strong> | Orphans found: <strong>' + data.orphan_count + '</strong></div>';
+        if (data.orphans && data.orphans.length > 0) {
+            html += '<table class="table table-sm table-bordered table-striped"><thead><tr><th>Key</th><th>Size (bytes)</th><th>Last Modified</th></tr></thead><tbody>';
+            data.orphans.forEach(function(o) {
+                html += '<tr><td class="text-truncate" style="max-width:400px" title="' + o.key + '">' + o.key + '</td><td>' + o.size + '</td><td>' + o.last_modified + '</td></tr>';
+            });
+            html += '</tbody></table>';
+            if (data.orphan_count > 500) {
+                html += '<p class="text-warning">Showing first 500 of ' + data.orphan_count + ' orphans.</p>';
+            }
+        }
+        container.innerHTML = html;
+        statusEl.textContent = 'Complete';
+    }, btn);
+});
+</script>
+{% endblock %}
