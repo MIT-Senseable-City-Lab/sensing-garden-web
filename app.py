@@ -1,4 +1,5 @@
 import csv
+import hashlib
 import io
 import json
 import os
@@ -17,6 +18,11 @@ from collections import defaultdict
 load_dotenv()
 
 app = Flask(__name__)
+app.secret_key = os.getenv("FLASK_SECRET_KEY", "sensing-garden-dashboard-dev")
+
+MODELS_BUCKET = os.getenv("MODELS_BUCKET", "scl-sensing-garden-models")
+MODEL_FILENAME = "model.hef"
+LABELS_FILENAME = "labels.txt"
 
 # Create client instance
 client = SensingGardenClient(
@@ -26,6 +32,144 @@ client = SensingGardenClient(
     aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY'),
     aws_region=os.getenv('AWS_REGION')
 )
+
+
+def get_models_s3_client():
+    """Build an S3 client for model bundle operations."""
+    client_kwargs = {}
+    if os.getenv('AWS_ACCESS_KEY_ID'):
+        client_kwargs['aws_access_key_id'] = os.getenv('AWS_ACCESS_KEY_ID')
+    if os.getenv('AWS_SECRET_ACCESS_KEY'):
+        client_kwargs['aws_secret_access_key'] = os.getenv('AWS_SECRET_ACCESS_KEY')
+    if os.getenv('AWS_SESSION_TOKEN'):
+        client_kwargs['aws_session_token'] = os.getenv('AWS_SESSION_TOKEN')
+    if os.getenv('AWS_REGION'):
+        client_kwargs['region_name'] = os.getenv('AWS_REGION')
+    return boto3.client('s3', **client_kwargs)
+
+
+def _bundle_key(model_id: str, filename: str) -> str:
+    return f"{model_id}/{filename}"
+
+def _compute_stream_sha256(file_storage) -> str:
+    """Compute a SHA256 hash for an uploaded file without consuming it permanently."""
+    hasher = hashlib.sha256()
+    file_storage.stream.seek(0)
+    while True:
+        chunk = file_storage.stream.read(1024 * 1024)
+        if not chunk:
+            break
+        hasher.update(chunk)
+    file_storage.stream.seek(0)
+    return hasher.hexdigest()
+
+
+def _normalize_s3_head(head: dict[str, Any]) -> dict[str, str]:
+    """Extract stable provenance fields from an S3 head_object response."""
+    normalized = {
+        "etag": str(head.get("ETag", "")).strip('"'),
+    }
+    version_id = head.get("VersionId")
+    if version_id:
+        normalized["version_id"] = str(version_id)
+    return normalized
+
+
+def upload_model_bundle(model_id: str, model_file, labels_file) -> dict[str, Any]:
+    """Upload the required bundle files for a model and return technical provenance."""
+    if not model_file or not getattr(model_file, "filename", ""):
+        raise ValueError("model.hef is required")
+    if not labels_file or not getattr(labels_file, "filename", ""):
+        raise ValueError("labels.txt is required")
+
+    s3_client = get_models_s3_client()
+    uploaded_at = datetime.utcnow().isoformat() + "Z"
+    model_sha256 = _compute_stream_sha256(model_file)
+    labels_sha256 = _compute_stream_sha256(labels_file)
+    model_file.stream.seek(0)
+    labels_file.stream.seek(0)
+    model_key = _bundle_key(model_id, MODEL_FILENAME)
+    labels_key = _bundle_key(model_id, LABELS_FILENAME)
+    s3_client.upload_fileobj(
+        model_file.stream,
+        MODELS_BUCKET,
+        model_key,
+        ExtraArgs={"ContentType": "application/octet-stream"},
+    )
+    s3_client.upload_fileobj(
+        labels_file.stream,
+        MODELS_BUCKET,
+        labels_key,
+        ExtraArgs={"ContentType": "text/plain"},
+    )
+    model_head = _normalize_s3_head(s3_client.head_object(Bucket=MODELS_BUCKET, Key=model_key))
+    labels_head = _normalize_s3_head(s3_client.head_object(Bucket=MODELS_BUCKET, Key=labels_key))
+
+    provenance = {
+        "bundle_uploaded_at": uploaded_at,
+        "model_id": model_id,
+        "bundle_key_model": model_key,
+        "bundle_key_labels": labels_key,
+        "model_sha256": model_sha256,
+        "labels_sha256": labels_sha256,
+        "model_etag": model_head["etag"],
+        "labels_etag": labels_head["etag"],
+    }
+    if "version_id" in model_head:
+        provenance["model_version_id"] = model_head["version_id"]
+    if "version_id" in labels_head:
+        provenance["labels_version_id"] = labels_head["version_id"]
+    return provenance
+
+
+def delete_model_bundle(model_id: str) -> int:
+    """Delete all objects under the model bundle prefix."""
+    s3_client = get_models_s3_client()
+    prefix = f"{model_id}/"
+    response = s3_client.list_objects_v2(Bucket=MODELS_BUCKET, Prefix=prefix)
+    objects = [{'Key': obj['Key']} for obj in response.get('Contents', [])]
+    if not objects:
+        return 0
+    s3_client.delete_objects(Bucket=MODELS_BUCKET, Delete={'Objects': objects, 'Quiet': True})
+    return len(objects)
+
+
+def create_model_record(model_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a model record through the API."""
+    api_key = os.getenv("SENSING_GARDEN_API_KEY")
+    if not api_key:
+        raise ValueError("SENSING_GARDEN_API_KEY is required")
+
+    response = requests.post(
+        f"{os.getenv('API_BASE_URL')}/models",
+        json=model_data,
+        headers={
+            "Content-Type": "application/json",
+            "x-api-key": api_key,
+        },
+        timeout=30,
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+def delete_model_record(model_id: str) -> Dict[str, Any]:
+    """Delete a model record through the API."""
+    api_key = os.getenv("SENSING_GARDEN_API_KEY")
+    if not api_key:
+        raise ValueError("SENSING_GARDEN_API_KEY is required")
+
+    response = requests.delete(
+        f"{os.getenv('API_BASE_URL')}/models",
+        json={"model_id": model_id},
+        headers={
+            "Content-Type": "application/json",
+            "x-api-key": api_key,
+        },
+        timeout=30,
+    )
+    response.raise_for_status()
+    return response.json()
 
 def fetch_data(
     table_type: str,
@@ -97,6 +241,26 @@ def fetch_data(
     except Exception as e:
         print(f"Error fetching {table_type} data: {str(e)}")
         return {'items': [], 'next_token': None}
+
+
+def _bundle_metadata(item: Dict[str, Any]) -> Dict[str, Any]:
+    metadata = item.get("metadata")
+    if isinstance(metadata, dict):
+        bundle = metadata.get("bundle")
+        if isinstance(bundle, dict):
+            return bundle
+    return {}
+
+
+def _bundle_status(item: Dict[str, Any]) -> str:
+    bundle = _bundle_metadata(item)
+    if bundle.get("model_sha256") and bundle.get("labels_sha256"):
+        return "Ready"
+    return "Legacy"
+
+
+def _short_hash(value: str) -> str:
+    return value[:12] if value else ""
 
 def get_field_names(items: List[Dict]) -> List[str]:
     """Extract field names from the first item in a list"""
@@ -360,13 +524,17 @@ def view_table(table_type):
         if not models_response.get('items'):
             return render_template('models.html',
                                   models=[],
-                                  field_names=[],
                                   next_token=None,
                                   prev_token=None,
                                   token_history='')
         
-        # Get field names from the first model
-        field_names = list(models_response['items'][0].keys())
+        # Add compact dashboard-specific bundle summary.
+        for item in models_response['items']:
+            bundle_meta = _bundle_metadata(item)
+            item['bundle_status'] = _bundle_status(item)
+            item['bundle_uploaded_at'] = bundle_meta.get('bundle_uploaded_at', '')
+            item['model_sha256_short'] = _short_hash(bundle_meta.get('model_sha256', ''))
+            item['labels_sha256_short'] = _short_hash(bundle_meta.get('labels_sha256', ''))
         
         # Get sort parameters for template
         sort_by = request.args.get('sort_by')
@@ -374,7 +542,6 @@ def view_table(table_type):
         
         return render_template('models.html',
                               models=models_response['items'],
-                              field_names=field_names,
                               next_token=models_response.get('next_token'),
                               prev_token=request.args.get('prev_token'),
                               token_history=request.args.get('token_history', ''),
@@ -384,7 +551,6 @@ def view_table(table_type):
         print(f"Error in view_table: {e}")
         return render_template('models.html',
                               models=[],
-                              field_names=[],
                               next_token=None,
                               prev_token=None,
                               token_history='',
@@ -702,6 +868,8 @@ def add_model():
 @app.route('/add_model', methods=['POST'])
 def add_model_submit():
     """Process the model addition form submission"""
+    uploaded_bundle = False
+    model_id = request.form.get('model_id', '')
     try:
         # Get form data
         model_data = {
@@ -718,13 +886,55 @@ def add_model_submit():
                 model_data['metadata'] = json.loads(metadata)
             except json.JSONDecodeError:
                 return render_template('add_model.html', error="Invalid JSON format for metadata")
-        
-        # Create the model using the new API
-        model = client.models.create(**model_data)
-        
+
+        bundle_metadata = upload_model_bundle(
+            model_data['model_id'],
+            request.files.get('model_file'),
+            request.files.get('labels_file'),
+        )
+        uploaded_bundle = True
+        merged_metadata = dict(model_data.get('metadata') or {})
+        merged_metadata['bundle'] = bundle_metadata
+        model_data['metadata'] = merged_metadata
+
+        # Create the model record after the bundle upload succeeds.
+        create_model_record(model_data)
         return redirect(url_for('view_table', table_type='models'))
     except Exception as e:
+        if uploaded_bundle and model_id:
+            try:
+                delete_model_bundle(model_id)
+            except Exception:
+                pass
         return render_template('add_model.html', error=str(e))
+
+
+@app.route('/models/<model_id>/delete', methods=['POST'])
+def delete_model(model_id: str):
+    """Delete a model bundle from S3 and remove the model record."""
+    try:
+        delete_model_bundle(model_id)
+        delete_model_record(model_id)
+        return redirect(url_for('view_table', table_type='models'))
+    except Exception as e:
+        try:
+            models_response = client.models.fetch(limit=50)
+            for item in models_response.get('items', []):
+                bundle_meta = _bundle_metadata(item)
+                item['bundle_status'] = _bundle_status(item)
+                item['bundle_uploaded_at'] = bundle_meta.get('bundle_uploaded_at', '')
+                item['model_sha256_short'] = _short_hash(bundle_meta.get('model_sha256', ''))
+                item['labels_sha256_short'] = _short_hash(bundle_meta.get('labels_sha256', ''))
+        except Exception:
+            models_response = {'items': []}
+        return render_template(
+            'models.html',
+            models=models_response.get('items', []),
+            next_token=models_response.get('next_token'),
+            prev_token=None,
+            token_history='',
+            error=str(e),
+        )
 
 @app.route('/view_device/<device_id>/videos')
 def view_device_videos(device_id):

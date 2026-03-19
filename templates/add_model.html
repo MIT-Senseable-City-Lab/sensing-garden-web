@@ -5,7 +5,7 @@
 {% block content %}
 <div class="container-fluid mt-4">
     <h2>Add New Model</h2>
-    <form id="add-model-form" action="{{ url_for('add_model_submit') }}" method="POST" class="needs-validation" novalidate>
+    <form id="add-model-form" action="{{ url_for('add_model_submit') }}" method="POST" enctype="multipart/form-data" class="needs-validation" novalidate>
         <div class="form-group mb-3">
             <label for="model_id">Model ID*</label>
             <input type="text" class="form-control" id="model_id" name="model_id" required>
@@ -32,8 +32,28 @@
             <textarea class="form-control" id="description" name="description" rows="3"></textarea>
             <small class="form-text text-muted">Optional description of the model</small>
         </div>
+
+        <div class="form-group mb-3">
+            <label for="model_file">HEF Model File*</label>
+            <input type="file" class="form-control-file" id="model_file" name="model_file" required>
+            <div class="invalid-feedback d-block">model.hef is required</div>
+            <small class="form-text text-muted">This will be stored in S3 as <code>model.hef</code> inside the bundle folder.</small>
+        </div>
+
+        <div class="form-group mb-3">
+            <label for="labels_file">Labels File*</label>
+            <input type="file" class="form-control-file" id="labels_file" name="labels_file" required>
+            <div class="invalid-feedback d-block">labels.txt is required</div>
+            <small class="form-text text-muted">This will be stored in S3 as <code>labels.txt</code> inside the bundle folder.</small>
+        </div>
+
+        <div class="form-group mb-3">
+            <label for="metadata">Metadata (JSON)</label>
+            <textarea class="form-control" id="metadata" name="metadata" rows="4" placeholder='{"type":"edge26-classifier"}'></textarea>
+            <small class="form-text text-muted">Optional JSON metadata stored with the model record.</small>
+        </div>
         
-        <button type="submit" class="btn btn-primary">Add Model</button>
+        <button type="submit" class="btn btn-primary">Upload Model Bundle</button>
         <a href="{{ url_for('view_table', table_type='models') }}" class="btn btn-secondary">Cancel</a>
     </form>
 
@@ -71,7 +91,7 @@ document.getElementById('add-model-form').addEventListener('submit', function(e)
         return;
     }
 
-    // Submit form
+    // Submit bundle form
     fetch('/add_model', {
         method: 'POST',
         body: new FormData(this)
@@ -86,7 +106,7 @@ document.getElementById('add-model-form').addEventListener('submit', function(e)
         }
     })
     .catch(error => {
-        alert('Error adding model: ' + error.message);
+        alert('Error uploading model bundle: ' + error.message);
     });
 });
 </script>

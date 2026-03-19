@@ -12,6 +12,10 @@ A web dashboard to view data from the Sensing Garden API using the sensing_garde
 # API Configuration for Sensing Garden Backend
 SENSING_GARDEN_API_KEY=your_api_key_here
 API_BASE_URL=https://your-api-endpoint.com
+AWS_ACCESS_KEY_ID=your_aws_access_key_id
+AWS_SECRET_ACCESS_KEY=your_aws_secret_access_key
+AWS_REGION=us-east-1
+MODELS_BUCKET=scl-sensing-garden-models
 ```
 
 ### Option 1: Using Poetry (Local Development)
@@ -61,6 +65,8 @@ http://localhost:8080
 - View detection data including images and metadata
 - View classification data including species information and confidence scores
 - View model information
+- Upload model bundles to the models S3 bucket
+- Delete model bundles from S3 and remove model records
 - View detailed information for each item
 - Direct links to S3 images
 - Pagination support for large datasets
@@ -78,6 +84,10 @@ The following environment variables are required (stored in the `.env` file):
 
 - `SENSING_GARDEN_API_KEY`: API key for authentication with the Sensing Garden API
 - `API_BASE_URL`: Base URL for the API
+- `AWS_ACCESS_KEY_ID`: AWS access key for model bundle management
+- `AWS_SECRET_ACCESS_KEY`: AWS secret access key for model bundle management
+- `AWS_REGION`: AWS region for S3 access
+- `MODELS_BUCKET`: S3 bucket used for model bundles
 
 ## Development
 

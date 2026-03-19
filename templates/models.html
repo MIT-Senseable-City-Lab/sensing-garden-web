@@ -1,13 +1,14 @@
 {% extends "base.html" %}
 
-{% from "table.html" import render_table, table_scripts %}
-
 {% block title %}Sensing Garden Dashboard - Models{% endblock %}
 
 {% block content %}
 <div class="container-fluid">
     <div class="d-flex justify-content-between align-items-center mb-3">
-        <h2>Models</h2>
+        <div>
+            <h2 class="mb-1">Models</h2>
+            <p class="text-muted mb-0">Manage model metadata and the S3 bundle for each model.</p>
+        </div>
         <a href="{{ url_for('add_model') }}" class="btn btn-primary">New Model</a>
     </div>
 
@@ -17,27 +18,74 @@
     </div>
     {% endif %}
 
-    {% if field_names %}
-    {% set pagination = {
-    'has_next': next_token is not none,
-    'next_url': url_for('view_table', table_type='models', next_token=next_token, prev_token=prev_token, token_history=token_history) if
-    next_token else None,
-    'has_prev': prev_token is not none,
-    'prev_url': url_for('view_table', table_type='models', next_token=prev_token, prev_token=next_token, token_history=token_history) if
-    prev_token else None
-    } %}
+    {% if models %}
+    <div class="mb-3">
+        <a href="{{ url_for('download_csv', table_type='models', device_id=None) }}" target="_blank" class="btn btn-secondary">Download CSV</a>
+    </div>
 
-    {{ render_table('modelsTable', models, field_names,
-    url_for('download_csv', table_type='models', device_id=None), pagination) }}
+    <div class="table-responsive">
+        <table class="table table-bordered table-hover">
+            <thead>
+                <tr>
+                    <th>Model</th>
+                    <th>Version</th>
+                    <th>Description</th>
+                    <th>Bundle</th>
+                    <th>Provenance</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for model in models %}
+                {% set model_id = model.get('id', model.get('model_id', '')) %}
+                <tr>
+                    <td>
+                        <div><strong>{{ model.get('name', '') }}</strong></div>
+                        <div><code>{{ model_id }}</code></div>
+                    </td>
+                    <td>{{ model.get('version', '') }}</td>
+                    <td>{{ model.get('description', '') }}</td>
+                    <td>
+                        <span class="badge {% if model.get('bundle_status') == 'Ready' %}badge-success{% else %}badge-secondary{% endif %}">
+                            {{ model.get('bundle_status', '') }}
+                        </span>
+                        {% if model.get('bundle_uploaded_at') %}
+                        <div class="small text-muted mt-1">{{ model.get('bundle_uploaded_at') }}</div>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if model.get('model_sha256_short') or model.get('labels_sha256_short') %}
+                        <div class="small"><strong>model</strong> {{ model.get('model_sha256_short', '') }}</div>
+                        <div class="small"><strong>labels</strong> {{ model.get('labels_sha256_short', '') }}</div>
+                        {% else %}
+                        <span class="text-muted">Not tracked</span>
+                        {% endif %}
+                    </td>
+                    <td class="text-nowrap">
+                        <form method="POST" action="{{ url_for('delete_model', model_id=model_id) }}" onsubmit="return confirm('Delete model {{ model_id }} from S3 and the registry?');" style="display:inline;">
+                            <button type="submit" class="btn btn-sm btn-danger">Delete</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
 
+    <div class="mt-3 text-center">
+        <div class="btn-group" role="group" aria-label="Pagination">
+            {% if prev_token %}
+            <a href="{{ url_for('view_table', table_type='models', next_token=prev_token, prev_token=next_token, token_history=token_history) }}" class="btn btn-primary">Previous</a>
+            {% endif %}
+            {% if next_token %}
+            <a href="{{ url_for('view_table', table_type='models', next_token=next_token, prev_token=prev_token, token_history=token_history) }}" class="btn btn-primary">Next</a>
+            {% endif %}
+        </div>
+    </div>
     {% else %}
     <div class="alert alert-info">
         No models found
     </div>
     {% endif %}
 </div>
-{% endblock %}
-
-{% block scripts %}
-{{ table_scripts('modelsTable') }}
 {% endblock %}
