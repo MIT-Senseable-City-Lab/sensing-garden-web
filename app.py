@@ -3,6 +3,7 @@ import hashlib
 import io
 import json
 import os
+from types import MethodType
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -32,6 +33,27 @@ client = SensingGardenClient(
     aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY'),
     aws_region=os.getenv('AWS_REGION')
 )
+
+WEB_READ_ONLY = os.getenv("WEB_READ_ONLY", "true").lower() in {"1", "true", "yes", "on"}
+
+
+def _authenticated_get(self, endpoint: str, params: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+    """Ensure GET requests include the configured API key when present."""
+    url = f"{self.base_url}/{endpoint}"
+    headers = {}
+    if self.api_key:
+        headers["x-api-key"] = self.api_key
+    response = requests.get(url, params=params, headers=headers or None)
+    response.raise_for_status()
+    return response.json()
+
+
+client._base_client.get = MethodType(_authenticated_get, client._base_client)
+
+
+@app.context_processor
+def inject_web_mode():
+    return {"web_read_only": WEB_READ_ONLY}
 
 
 def get_models_s3_client():
@@ -863,11 +885,15 @@ def image_proxy():
 @app.route('/add_model', methods=['GET'])
 def add_model():
     """Show the form to add a new model"""
+    if WEB_READ_ONLY:
+        return render_template('error.html', error="Model management is disabled in read-only mode"), 403
     return render_template('add_model.html')
 
 @app.route('/add_model', methods=['POST'])
 def add_model_submit():
     """Process the model addition form submission"""
+    if WEB_READ_ONLY:
+        return render_template('error.html', error="Model management is disabled in read-only mode"), 403
     uploaded_bundle = False
     model_id = request.form.get('model_id', '')
     try:
@@ -912,6 +938,8 @@ def add_model_submit():
 @app.route('/models/<model_id>/delete', methods=['POST'])
 def delete_model(model_id: str):
     """Delete a model bundle from S3 and remove the model record."""
+    if WEB_READ_ONLY:
+        return render_template('error.html', error="Model deletion is disabled in read-only mode"), 403
     try:
         delete_model_bundle(model_id)
         delete_model_record(model_id)
@@ -1092,6 +1120,11 @@ def get_device_feed_data(device_id):
 @app.route('/delete_device/<device_id>', methods=['DELETE'])
 def delete_device(device_id):
     """Delete a device and all its associated data"""
+    if WEB_READ_ONLY:
+        return jsonify({
+            'success': False,
+            'error': 'Device deletion is disabled in read-only mode'
+        }), 403
     try:
         print(f"[DEBUG] Starting device deletion for device: {device_id}")
         

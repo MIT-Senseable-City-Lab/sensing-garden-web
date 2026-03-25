@@ -23,9 +23,11 @@
     </button>
     
     <!-- Delete Device Button -->
+    {% if not web_read_only %}
     <button type="button" class="btn btn-danger" data-toggle="modal" data-target="#deleteDeviceModal">
         <i class="fas fa-trash"></i> Delete All Device Data
     </button>
+    {% endif %}
     <!-- CSV Download Modal -->
     <div class="modal fade" id="downloadModal" tabindex="-1" role="dialog" aria-labelledby="downloadModalLabel" aria-hidden="true">
         <div class="modal-dialog" role="document">
@@ -80,6 +82,7 @@
         </div>
     </div>
 
+    {% if not web_read_only %}
     <!-- Delete Device Modal -->
     <div class="modal fade" id="deleteDeviceModal" tabindex="-1" role="dialog" aria-labelledby="deleteDeviceModalLabel" aria-hidden="true">
         <div class="modal-dialog" role="document">
@@ -137,6 +140,7 @@
             </div>
         </div>
     </div>
+    {% endif %}
 
     <script>
     function downloadCSV() {

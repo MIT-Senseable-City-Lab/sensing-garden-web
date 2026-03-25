@@ -9,7 +9,9 @@
             <h2 class="mb-1">Models</h2>
             <p class="text-muted mb-0">Manage model metadata and the S3 bundle for each model.</p>
         </div>
+        {% if not web_read_only %}
         <a href="{{ url_for('add_model') }}" class="btn btn-primary">New Model</a>
+        {% endif %}
     </div>
 
     {% if error %}
@@ -62,9 +64,13 @@
                         {% endif %}
                     </td>
                     <td class="text-nowrap">
+                        {% if not web_read_only %}
                         <form method="POST" action="{{ url_for('delete_model', model_id=model_id) }}" onsubmit="return confirm('Delete model {{ model_id }} from S3 and the registry?');" style="display:inline;">
                             <button type="submit" class="btn btn-sm btn-danger">Delete</button>
                         </form>
+                        {% else %}
+                        <span class="text-muted small">Read only</span>
+                        {% endif %}
                     </td>
                 </tr>
                 {% endfor %}
