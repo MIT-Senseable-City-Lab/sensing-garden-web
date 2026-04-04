@@ -15,34 +15,27 @@ from app import app
 import app as dashboard_app
 
 
-class FakeModelClient:
-    def fetch(self, *args, **kwargs):
-        return {
-            "items": [
-                {
-                    "id": "bundle-model",
-                    "name": "Bundle Model",
-                    "version": "1.0.0",
-                    "description": "test",
-                    "metadata": {
-                        "bundle": {
-                            "bundle_uploaded_at": "2026-03-18T00:00:00Z",
-                            "model_sha256": "abc123abc123abc123",
-                            "labels_sha256": "def456def456def456",
-                        }
-                    },
+FAKE_MODELS_RESPONSE = {
+    "items": [
+        {
+            "id": "bundle-model",
+            "name": "Bundle Model",
+            "version": "1.0.0",
+            "description": "test",
+            "metadata": {
+                "bundle": {
+                    "bundle_uploaded_at": "2026-03-18T00:00:00Z",
+                    "model_sha256": "abc123abc123abc123",
+                    "labels_sha256": "def456def456def456",
                 }
-            ]
+            },
         }
-
-
-class FakeSensingGardenClient:
-    def __init__(self):
-        self.models = FakeModelClient()
+    ]
+}
 
 
 def test_models_page_shows_bundle_status(monkeypatch):
-    monkeypatch.setattr(dashboard_app, "client", FakeSensingGardenClient())
+    monkeypatch.setattr(dashboard_app.api, "fetch_models", lambda **kw: FAKE_MODELS_RESPONSE)
 
     with app.test_client() as client:
         response = client.get("/view_table/models")

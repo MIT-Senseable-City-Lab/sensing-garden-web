@@ -1,97 +1,222 @@
-{% macro render_table(table_id, items, headers, download_url, pagination=None, page_limit=50) %}
-<!-- Controls outside of the table-responsive area -->
+{% extends "base.html" %}
+
+{% macro render_cell(row, column) %}
+    {% set value = row.get(column.key) %}
+    {% if column.kind == "image" %}
+        {% set image_url = row.get(column.url_key) %}
+        {% if image_url %}
+        <a class="thumb-link js-image-modal" href="{{ image_url }}" data-image-url="{{ image_url }}" data-image-title="{{ column.label }}">
+            <img src="{{ image_url }}" alt="{{ column.label }}">
+        </a>
+        {% endif %}
+    {% elif column.kind == "video" %}
+        {% set video_url = row.get(column.url_key) %}
+        {% if video_url %}
+        <button
+            type="button"
+            class="btn btn-sm btn-outline-primary js-video-modal"
+            data-video-url="{{ video_url }}"
+            data-video-title="{{ row.get('video_key') or column.label }}"
+        >
+            Play
+        </button>
+        {% endif %}
+    {% elif column.kind == "external_link" %}
+        {% set external_url = row.get(column.url_key) %}
+        {% if external_url %}
+        <a href="{{ external_url }}" target="_blank" rel="noopener noreferrer">Open</a>
+        {% endif %}
+    {% elif column.kind == "badge" %}
+        {% if value == "online" %}
+        <span class="badge badge-online">online</span>
+        {% elif value == "offline" %}
+        <span class="badge badge-offline">offline</span>
+        {% elif value == "flick" %}
+        <span class="badge badge-flick">flick</span>
+        {% elif value == "dot" %}
+        <span class="badge badge-dot">dot</span>
+        {% else %}
+        <span class="badge badge-light">{{ value }}</span>
+        {% endif %}
+    {% elif column.kind == "json" %}
+        {% if value %}
+        <pre class="json-cell">{{ value | tojson(indent=2) if value is mapping or value is sequence and value is not string else value }}</pre>
+        {% endif %}
+    {% elif column.kind == "list" %}
+        {% if value %}
+            {% for item in value %}
+            <div class="mb-1"><code>{{ item }}</code></div>
+            {% endfor %}
+        {% endif %}
+    {% elif column.link_endpoint == "view_track_detail" and row.get(column.link_param or column.key) %}
+        <a href="{{ url_for('view_track_detail', track_id=row.get(column.link_param or column.key)) }}">
+            <code>{{ value }}</code>
+        </a>
+    {% elif value is mapping or value is sequence and value is not string %}
+        <pre class="json-cell">{{ value | tojson(indent=2) }}</pre>
+    {% elif column.key.endswith("_id") or column.key.endswith("_key") or column.key.endswith("_prefix") %}
+        {% if value %}<code>{{ value }}</code>{% endif %}
+    {% else %}
+        {{ value if value is not none else "" }}
+    {% endif %}
+{% endmacro %}
+
+{% block title %}{{ title }} - Sensing Garden Admin{% endblock %}
+
+{% block content %}
+<section class="page-header">
+    <h2>{{ title }}</h2>
+    <p class="page-subtitle">{{ description }}</p>
+</section>
+
+{% if info_message %}
+<div class="alert alert-light border" role="alert">
+    {{ info_message }}
+</div>
+{% endif %}
+
+{% if filters %}
+<form method="get" class="filter-panel">
+    <div class="form-row">
+        <div class="form-group col-md-3">
+            <label for="table-search">Search</label>
+            <input type="text" class="form-control form-control-sm" id="table-search" placeholder="Search...">
+        </div>
+        {% for filter in filters %}
+        <div class="form-group col-md-3">
+            <label for="{{ filter.name }}">{{ filter.label }}</label>
+            {% if filter.type == "text" %}
+            <input type="text" class="form-control form-control-sm" id="{{ filter.name }}" name="{{ filter.name }}" value="{{ filter.value }}">
+            {% else %}
+            <select class="form-control form-control-sm" id="{{ filter.name }}" name="{{ filter.name }}">
+                {% if filter.name != "limit" %}
+                <option value="">All</option>
+                {% endif %}
+                {% for option in filter.options %}
+                <option value="{{ option }}" {% if filter.value == option %}selected{% endif %}>{{ option }}</option>
+                {% endfor %}
+            </select>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+    <div class="form-row">
+        <div class="form-group col-md-6 d-flex align-items-end">
+            <button type="submit" class="btn btn-sm btn-primary">Apply Filters</button>
+            <a href="{{ url_for(endpoint) }}" class="btn btn-sm btn-outline-secondary">Reset</a>
+            {% if export_url %}
+            <a href="{{ export_url }}" target="_blank" rel="noopener noreferrer" class="btn btn-sm btn-outline-success ml-2">Download CSV</a>
+            {% endif %}
+        </div>
+    </div>
+</form>
+{% elif export_url %}
 <div class="mb-3">
-    <div class="d-flex justify-content-between align-items-center">
-        <div>
-            <a href="{{ download_url }}" target="_blank" class="btn btn-secondary">Download CSV</a>
+    <a href="{{ export_url }}" target="_blank" rel="noopener noreferrer" class="btn btn-sm btn-outline-success">Download CSV</a>
+</div>
+<div class="filter-panel">
+    <div class="form-row">
+        <div class="form-group col-md-3 mb-0">
+            <label for="table-search">Search</label>
+            <input type="text" class="form-control form-control-sm" id="table-search" placeholder="Search...">
         </div>
     </div>
 </div>
-
-<div class="mb-3 d-flex justify-content-between align-items-center">
-    <div id="{{ table_id }}_info" class="dataTables_info">Showing up to {{ page_limit }} items per page</div>
+{% else %}
+<div class="filter-panel">
+    <div class="form-row">
+        <div class="form-group col-md-3 mb-0">
+            <label for="table-search">Search</label>
+            <input type="text" class="form-control form-control-sm" id="table-search" placeholder="Search...">
+        </div>
+    </div>
 </div>
-<!-- Table within scrollable area -->
-<div class="table-responsive">
-    <table id="{{ table_id }}" data-table-id="{{ table_id }}" data-page-limit="{{ page_limit }}" class="table table-bordered table-hover">
-        <thead>
-            <tr>
-                {% for header in headers %}
-                <th>{{ header }}</th>
-                {% endfor %}
-            </tr>
-        </thead>
-        <tbody>
-            {% for item in items %}
-            <tr>
-                {% for header in headers %}
-                <td>
-                    {% if header == 'image_url' and item.get('image_url') %}
-                    <div style="position: relative; display: inline-block; max-height: 100px;">
-                        {% set bbox = item.get('bounding_box', None) %}
-                        <img src="{{ item.image_url }}" class="img-fluid detection-img clickable-image"
-                            style="max-height: 100px; display: block; cursor: pointer;"
-                            data-image-url="{{ item.image_url }}"
-                            data-bbox="{{ bbox|tojson if bbox and bbox|length==4 else 'null' }}"
-                            data-timestamp="{{ item.get('formatted_time', item.get('timestamp', '')) }}">
-                        <!-- DEBUG: bbox for image_url={{ item.image_url }} is {{ bbox }} -->
+{% endif %}
 
-                        {% if bbox and bbox|length == 4 %}
-                        <svg class="bbox-svg-overlay"
-                            style="position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none;">
-                            <polygon points="" style="fill:none;stroke:#ff0000;stroke-width:2;" />
-                        </svg>
+<div class="summary-bar">
+    Showing {{ count }} row(s){% if total_count is not none %} of {{ total_count }}{% endif %}.
+</div>
+
+<div class="table-wrap">
+    <div class="table-responsive">
+        <table class="table table-sm table-hover table-admin">
+            <thead>
+                <tr>
+                    {% for column in columns %}
+                    <th>
+                        {% if column.sortable and sort_urls.get(column.key) %}
+                        <a href="{{ sort_urls[column.key] }}" class="text-dark">
+                            {{ column.label }}
+                            {% if sort_by == column.key %}
+                                {% if sort_desc %}↓{% else %}↑{% endif %}
+                            {% endif %}
+                        </a>
+                        {% else %}
+                        {{ column.label }}
                         {% endif %}
-                    </div>
-                    {% elif header in ['image_key', 'image_bucket'] %}
-                    {{ item.get(header, '') }}
-                    {% if header == 'image_key' and item.get('image_url') %}
-                    <a href="{{ item.image_url }}" target="_blank" class="btn btn-sm btn-outline-primary ml-2">View</a>
-                    {% endif %}
-                    {% else %}
-                    {% set value = item.get(header, '') %}
-                    {% if value is number and value is float %}
-                    {{ '{:.4f}'.format(value) }}
-                    {% else %}
-                    {{ value }}
-                    {% endif %}
-                    {% endif %}
-                </td>
+                    </th>
+                    {% endfor %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in rows %}
+                <tr>
+                    {% for column in columns %}
+                    <td>{{ render_cell(row, column) }}</td>
+                    {% endfor %}
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="{{ columns|length }}" class="text-muted">No rows found.</td>
+                </tr>
                 {% endfor %}
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
+            </tbody>
+        </table>
+    </div>
 </div>
 
-<!-- Pagination outside of the table-responsive area -->
-<div class="mt-3 text-center">
-    <div class="btn-group" role="group" aria-label="Pagination">
-        {% if pagination and pagination.has_prev %}
-        <a href="{{ pagination.prev_url }}" class="btn btn-primary">Previous</a>
+{% if pagination %}
+<div class="d-flex justify-content-between align-items-center mt-3">
+    <div class="text-muted small">Page {{ pagination.page }}</div>
+    <div>
+        {% if pagination.has_prev %}
+        <a href="{{ pagination.prev_url }}" class="btn btn-sm btn-outline-secondary">Previous</a>
         {% endif %}
-
-        {% if pagination and pagination.has_next %}
-        <a href="{{ pagination.next_url }}" class="btn btn-primary">Next</a>
+        {% if pagination.has_next %}
+        <a href="{{ pagination.next_url }}" class="btn btn-sm btn-primary">Next</a>
         {% endif %}
     </div>
 </div>
-{% endmacro %}
+{% endif %}
+{% endblock %}
 
-{% macro bbox_overlay_script() %}
-<script src="{{ url_for('static', filename='js/bbox_overlays.js') }}"></script>
-
-
-{% endmacro %}
-
-{% macro table_scripts(table_id) %}
-{{ bbox_overlay_script() }}
-    <style>
-        @media (max-width: 768px) {
-            .mb-3.d-flex {
-                flex-direction: column;
-                align-items: stretch !important;
-            }
+{% block scripts %}
+<script>
+    (function () {
+        var searchInput = document.getElementById('table-search');
+        var tableBody = document.querySelector('.table-admin tbody');
+        if (!searchInput || !tableBody) {
+            return;
         }
-    </style>
-{% endmacro %}
+
+        function applyTableSearch() {
+            var query = searchInput.value.trim().toLowerCase();
+            var rows = tableBody.querySelectorAll('tr');
+            rows.forEach(function (row) {
+                var text = row.textContent.toLowerCase();
+                var isMatch = !query || text.indexOf(query) !== -1;
+                row.style.display = isMatch ? '' : 'none';
+            });
+        }
+
+        searchInput.addEventListener('input', applyTableSearch);
+
+        var resetLink = document.querySelector('.filter-panel a.btn-outline-secondary');
+        if (resetLink) {
+            resetLink.addEventListener('click', function () {
+                searchInput.value = '';
+            });
+        }
+    }());
+</script>
+{% endblock %}

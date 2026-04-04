@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+
+{% block title %}Track {{ track.get('track_id') }} - Sensing Garden Admin{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-start mb-3">
+    <div class="page-header mb-0">
+        <h2>Track Detail</h2>
+        <p class="page-subtitle"><code>{{ track.get('track_id') }}</code></p>
+    </div>
+    <div>
+        <a href="{{ url_for('view_tracks') }}" class="btn btn-sm btn-outline-secondary">Back to Tracks</a>
+        <a href="{{ classification_url }}" class="btn btn-sm btn-primary">View Classifications</a>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-lg-8 mb-3">
+        <div class="table-wrap">
+            <table class="table table-sm table-admin mb-0">
+                <tbody>
+                    {% for key, value in track.items() %}
+                    {% if key != 'composite_url' %}
+                    <tr>
+                        <th style="width: 220px;">{{ key }}</th>
+                        <td>
+                            {% if value is mapping or value is sequence and value is not string %}
+                            <pre class="json-cell">{{ value | tojson(indent=2) }}</pre>
+                            {% elif key.endswith('_id') or key.endswith('_key') or key.endswith('_prefix') %}
+                            {% if value %}<code>{{ value }}</code>{% endif %}
+                            {% else %}
+                            {{ value if value is not none else "" }}
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endif %}
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    <div class="col-lg-4 mb-3">
+        <div class="table-wrap p-3">
+            <h5 class="mb-3">Composite Image</h5>
+            {% if track.get('composite_url') %}
+            <a href="{{ track.get('composite_url') }}" class="js-image-modal" data-image-url="{{ track.get('composite_url') }}" data-image-title="Composite image">
+                <img src="{{ track.get('composite_url') }}" class="img-fluid border rounded" alt="Composite image">
+            </a>
+            {% else %}
+            <div class="text-muted">No composite image available.</div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<div class="table-wrap p-3">
+    <h5 class="mb-3">Raw JSON</h5>
+    <pre class="json-cell">{{ track_json }}</pre>
+</div>
+{% endblock %}

@@ -11,7 +11,6 @@ flask = "^3.1.0"
 python-dotenv = "^1.0.0"
 json-schema-for-humans = "^0.47.0"
 requests = "^2.31.0"
-sensing_garden_client = "0.0.12"
 boto3 = "^1.40.29"
 gunicorn = "^21.2.0"
 

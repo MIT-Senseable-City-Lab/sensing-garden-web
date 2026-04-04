@@ -793,22 +793,6 @@ botocore = ">=1.37.4,<2.0a0"
 crt = ["botocore[crt] (>=1.37.4,<2.0a0)"]
 
 [[package]]
-name = "sensing-garden-client"
-version = "0.0.12"
-description = "Sensing Garden Client for API interaction"
-optional = false
-python-versions = ">=3.8"
-groups = ["main"]
-files = [
-    {file = "sensing_garden_client-0.0.12-py3-none-any.whl", hash = "sha256:75f8611a57ca32beccd6ba720537b9916f929ecd047ff4c6491dd7479e2acec2"},
-    {file = "sensing_garden_client-0.0.12.tar.gz", hash = "sha256:bede921210478ef541db66a24978f6ee0d30c55637c7b2b9729673cfca551054"},
-]
-
-[package.dependencies]
-boto3 = ">=1.28.0,<2.0.0"
-requests = ">=2.32.3,<3.0.0"
-
-[[package]]
 name = "six"
 version = "1.17.0"
 description = "Python 2 and 3 compatibility utilities"
@@ -971,4 +955,4 @@ type = ["pytest-mypy"]
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.9"
-content-hash = "703b19a226f20a8725fad994307c04792f5b4ee401b978d76894a8ee21655d68"
+content-hash = "802f1b9d1e0655a8fd617cc8a1372c320907aa64b836f1013a1d5d915b3cb366"

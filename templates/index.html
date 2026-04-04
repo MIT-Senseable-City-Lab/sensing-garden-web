@@ -1,32 +1,25 @@
 {% extends "base.html" %}
 
-{% block title %}Sensing Garden{% endblock %}
+{% block title %}Overview - Sensing Garden Admin{% endblock %}
 
 {% block content %}
-<div class="jumbotron">
-    <h1 class="display-4">Sensing Garden</h1>
-    <hr class="my-4">
-    <div class="row">
-        <div class="col-md-6 mb-3">
-            <div class="card">
+<section class="page-header">
+    <h1>Overview</h1>
+    <p class="page-subtitle">API-backed snapshot of the main backend entities.</p>
+</section>
+
+<div class="row">
+    {% for item in counts %}
+    <div class="col-sm-6 col-lg-3 mb-3">
+        <a href="{{ url_for(item.endpoint) }}" class="text-decoration-none text-reset">
+            <div class="overview-card">
                 <div class="card-body">
-                    <h5 class="card-title">Select Device</h5>
-                    <p class="card-text">Select a device to view its data and update its model.</p>
-                    <form
-                        onsubmit="window.location.href='/view_device/' + document.getElementById('deviceSelect').value; return false;">
-                        <div class="form-group">
-                            <label for="deviceSelect">Device ID</label>
-                            <select class="form-control" id="deviceSelect" name="device_id">
-                                {% for device_id in device_ids %}
-                                <option value="{{ device_id }}">{{ device_id }}</option>
-                                {% endfor %}
-                            </select>
-                        </div>
-                        <button type="submit" class="btn btn-primary">View Device</button>
-                    </form>
+                    <div class="text-muted small text-uppercase">{{ item.name }}</div>
+                    <div class="count-value mt-2">{{ item.count }}</div>
                 </div>
             </div>
-        </div>
+        </a>
     </div>
+    {% endfor %}
 </div>
 {% endblock %}
