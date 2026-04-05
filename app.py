@@ -256,8 +256,11 @@ class ApiClient:
             self._request("GET", "environment/count", params=self._list_params(device_id=device_id)).get("count", 0)
         )
 
-    def fetch_heartbeats(self) -> Dict[str, Any]:
-        return self._request("GET", "heartbeats")
+    def fetch_heartbeats(self, *, device_id: str = "") -> Dict[str, Any]:
+        params = {}
+        if device_id:
+            params["device_id"] = device_id
+        return self._request("GET", "heartbeats", params=params)
 
     def fetch_deployments(
         self,
@@ -1512,8 +1515,14 @@ def view_devices() -> str:
 def view_heartbeats() -> str:
     search_query = _get_search_query()
     sort_by, sort_desc = _get_sort("timestamp", True)
+    device_id_filter = request.args.get("device_id", "")
     try:
-        response = api.fetch_heartbeats()
+        if device_id_filter:
+            response = api.fetch_heartbeats(device_id=device_id_filter)
+            description = f"All heartbeats for {device_id_filter}."
+        else:
+            response = api.fetch_heartbeats()
+            description = "Latest heartbeat per device."
         device_names = _device_display_names()
         items = [_normalize_heartbeat_row(item) for item in response.get("items", [])]
         for item in items:
@@ -1524,14 +1533,16 @@ def view_heartbeats() -> str:
         paged = _local_pagination(items, "view_heartbeats", _get_page(), _get_limit())
         context = _table_context(
             title="Heartbeats",
-            description="Latest heartbeat per device.",
+            description=description,
             endpoint="view_heartbeats",
             rows=paged["items"],
             columns=HEARTBEAT_COLUMNS,
             sort_by=sort_by,
             sort_desc=sort_desc,
             pagination=paged["pagination"],
-            filters=[],
+            filters=[
+                {"name": "device_id", "label": "Device ID", "value": device_id_filter, "options": _device_ids()},
+            ],
             count=len(paged["items"]),
             total_count=paged["count"],
             export_url=_build_export_url("heartbeats"),
