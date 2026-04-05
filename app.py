@@ -20,7 +20,7 @@ load_dotenv()
 app = Flask(__name__)
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "sensing-garden-dashboard-dev")
 
-API_BASE_URL = os.getenv("API_BASE_URL", "https://nxdp0npcb2.execute-api.us-east-1.amazonaws.com")
+API_BASE_URL = os.getenv("API_BASE_URL", "https://api.sensinggarden.com/v1")
 API_KEY = os.getenv("SENSING_GARDEN_API_KEY", "")
 MODELS_BUCKET = os.getenv("MODELS_BUCKET", "scl-sensing-garden-models")
 VIDEOS_BUCKET = os.getenv("VIDEOS_BUCKET", "scl-sensing-garden-videos")
