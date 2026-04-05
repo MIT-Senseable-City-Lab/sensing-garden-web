@@ -1,59 +1,30 @@
 {% extends "base.html" %}
 
-{% block title %}Sensing Garden Dashboard - Add New Model{% endblock %}
+{% block title %}Sensing Garden Dashboard - Upload Model Bundle{% endblock %}
 
 {% block content %}
 <div class="container-fluid mt-4">
-    <h2>Add New Model</h2>
-    <form id="add-model-form" action="{{ url_for('add_model_submit') }}" method="POST" enctype="multipart/form-data" class="needs-validation" novalidate>
+    <h2>Upload Model Bundle</h2>
+    <form action="{{ url_for('add_model_submit') }}" method="POST" enctype="multipart/form-data">
         <div class="form-group mb-3">
-            <label for="model_id">Model ID*</label>
-            <input type="text" class="form-control" id="model_id" name="model_id" value="{{ form_values.model_id if form_values else '' }}" required>
-            <div class="invalid-feedback">Model ID is required</div>
-            <small class="form-text text-muted">Unique identifier for the model (required)</small>
-        </div>
-        
-        <div class="form-group mb-3">
-            <label for="name">Model Name*</label>
-            <input type="text" class="form-control" id="name" name="name" value="{{ form_values.name if form_values else '' }}" required>
-            <div class="invalid-feedback">Model name is required</div>
-            <small class="form-text text-muted">Name of the model (required)</small>
-        </div>
-        
-        <div class="form-group mb-3">
-            <label for="version">Version*</label>
-            <input type="text" class="form-control" id="version" name="version" value="{{ form_values.version if form_values else '' }}" required>
-            <div class="invalid-feedback">Version is required</div>
-            <small class="form-text text-muted">Version string for the model (required)</small>
-        </div>
-        
-        <div class="form-group mb-3">
-            <label for="description">Description</label>
-            <textarea class="form-control" id="description" name="description" rows="3">{{ form_values.description if form_values else '' }}</textarea>
-            <small class="form-text text-muted">Optional description of the model</small>
+            <label for="bundle_name">Bundle Name</label>
+            <input type="text" class="form-control" id="bundle_name" name="bundle_name" value="{{ form_values.bundle_name if form_values else '' }}" required>
+            <small class="form-text text-muted">Stored in S3 as the top-level folder name.</small>
         </div>
 
         <div class="form-group mb-3">
-            <label for="model_file">HEF Model File*</label>
+            <label for="model_file">model.hef</label>
             <input type="file" class="form-control-file" id="model_file" name="model_file" accept=".hef" required>
-            <div class="invalid-feedback d-block">model.hef is required</div>
-            <small class="form-text text-muted">This will be stored in S3 as <code>model.hef</code> inside the bundle folder.</small>
+            <small class="form-text text-muted">Uploaded to <code>{bundle}/model.hef</code>.</small>
         </div>
 
         <div class="form-group mb-3">
-            <label for="labels_file">Labels File*</label>
+            <label for="labels_file">labels.txt</label>
             <input type="file" class="form-control-file" id="labels_file" name="labels_file" accept=".txt" required>
-            <div class="invalid-feedback d-block">labels.txt is required</div>
-            <small class="form-text text-muted">This will be stored in S3 as <code>labels.txt</code> inside the bundle folder.</small>
+            <small class="form-text text-muted">Uploaded to <code>{bundle}/labels.txt</code>.</small>
         </div>
 
-        <div class="form-group mb-3">
-            <label for="metadata">Metadata (JSON)</label>
-            <textarea class="form-control" id="metadata" name="metadata" rows="4" placeholder='{"type":"edge26-classifier"}'>{{ form_values.metadata if form_values else '' }}</textarea>
-            <small class="form-text text-muted">Optional JSON metadata stored with the model record.</small>
-        </div>
-        
-        <button type="submit" class="btn btn-primary">Upload Model Bundle</button>
+        <button type="submit" class="btn btn-primary">Upload Bundle</button>
         <a href="{{ url_for('view_models') }}" class="btn btn-secondary">Cancel</a>
     </form>
 
@@ -63,29 +34,4 @@
     </div>
     {% endif %}
 </div>
-
-<script>
-function generateUUID() {
-    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-        var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
-        return v.toString(16);
-    });
-}
-
-// Set UUID to model_id field if it's empty
-document.addEventListener('DOMContentLoaded', function() {
-    const modelIdField = document.getElementById('model_id');
-    if (!modelIdField.value) {
-        modelIdField.value = generateUUID();
-    }
-});
-
-document.getElementById('add-model-form').addEventListener('submit', function(e) {
-    if (!this.checkValidity()) {
-        e.preventDefault();
-        e.stopPropagation();
-        this.classList.add('was-validated');
-    }
-});
-</script>
 {% endblock %}

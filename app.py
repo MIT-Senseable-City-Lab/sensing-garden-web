@@ -37,7 +37,7 @@ DEFAULT_PAGE_LIMIT = 50
 MAX_PAGE_LIMIT = 200
 FETCH_ALL_PAGE_LIMIT = 500
 WEB_READ_ONLY = os.getenv("WEB_READ_ONLY", "true").lower() in {"1", "true", "yes", "on"}
-EXPORTABLE_API_TABLES = {"classifications", "devices", "models", "videos", "environment"}
+EXPORTABLE_API_TABLES = {"classifications", "devices", "videos", "environment"}
 
 
 @dataclass(frozen=True)
@@ -411,12 +411,11 @@ ENVIRONMENT_COLUMNS = [
 ]
 
 MODEL_COLUMNS = [
-    TableColumn("id", "Model ID"),
-    TableColumn("timestamp", "Timestamp"),
-    TableColumn("name", "Name"),
-    TableColumn("description", "Description"),
-    TableColumn("version", "Version"),
-    TableColumn("metadata", "Metadata", sortable=False, kind="json"),
+    TableColumn("bundle_name", "Bundle"),
+    TableColumn("files_present", "Files Present", sortable=False),
+    TableColumn("model_size_bytes", "model.hef"),
+    TableColumn("labels_size_bytes", "labels.txt"),
+    TableColumn("last_modified_time", "Last Modified"),
 ]
 
 
@@ -442,40 +441,120 @@ def _bundle_key(model_id: str, filename: str) -> str:
     return f"{model_id}/{filename}"
 
 
-def _compute_stream_sha256(file_storage: Any) -> str:
-    hasher = hashlib.sha256()
-    file_storage.stream.seek(0)
-    while True:
-        chunk = file_storage.stream.read(1024 * 1024)
-        if not chunk:
-            break
-        hasher.update(chunk)
-    file_storage.stream.seek(0)
-    return hasher.hexdigest()
-
-
-def _normalize_s3_head(head: Dict[str, Any]) -> Dict[str, str]:
-    normalized = {"etag": str(head.get("ETag", "")).strip('"')}
-    version_id = head.get("VersionId")
-    if version_id:
-        normalized["version_id"] = str(version_id)
+def _validate_bundle_name(bundle_name: str) -> str:
+    normalized = bundle_name.strip()
+    if not normalized:
+        raise ValueError("Bundle name is required")
+    if "/" in normalized:
+        raise ValueError("Bundle name must not contain '/'")
     return normalized
 
 
-def upload_model_bundle(model_id: str, model_file: Any, labels_file: Any) -> Dict[str, Any]:
+def _public_model_url(key: str) -> str:
+    return f"https://{MODELS_BUCKET}.s3.amazonaws.com/{key}"
+
+
+def _s3_object_timestamp(value: Any) -> str:
+    if not isinstance(value, datetime):
+        raise ValueError("S3 object is missing a valid LastModified timestamp")
+    return value.astimezone(timezone.utc).isoformat()
+
+
+def _s3_object_summary(item: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    key = str(item.get("Key") or "")
+    parts = key.split("/", 1)
+    if len(parts) != 2 or not parts[0] or not parts[1]:
+        return None
+    return {
+        "bundle_name": parts[0],
+        "name": parts[1],
+        "key": key,
+        "size_bytes": int(item.get("Size", 0)),
+        "size_display": _format_bytes(item.get("Size", 0)),
+        "last_modified_time": _s3_object_timestamp(item.get("LastModified")),
+        "last_modified_display": _format_timestamp(_s3_object_timestamp(item.get("LastModified"))),
+        "download_url": _public_model_url(key),
+    }
+
+
+def _bundle_file(bundle: Dict[str, Any], filename: str) -> Optional[Dict[str, Any]]:
+    for item in bundle["files"]:
+        if item["name"] == filename:
+            return item
+    return None
+
+
+def _bundle_extra_files(bundle: Dict[str, Any]) -> List[Dict[str, Any]]:
+    return [item for item in bundle["files"] if item["name"] not in {MODEL_FILENAME, LABELS_FILENAME}]
+
+
+def _bundle_row(bundle_name: str, files: List[Dict[str, Any]]) -> Dict[str, Any]:
+    bundle_files = {"files": files}
+    model_file = _bundle_file(bundle_files, MODEL_FILENAME)
+    labels_file = _bundle_file(bundle_files, LABELS_FILENAME)
+    latest_modified = max(file["last_modified_time"] for file in files)
+    return {
+        "bundle_name": bundle_name,
+        "files": sorted(files, key=lambda item: item["name"]),
+        "files_present": ", ".join(sorted(file["name"] for file in files)),
+        "model_file": model_file,
+        "labels_file": labels_file,
+        "extra_files": _bundle_extra_files(bundle_files),
+        "model_size_bytes": (model_file or {}).get("size_bytes", 0),
+        "labels_size_bytes": (labels_file or {}).get("size_bytes", 0),
+        "last_modified_time": latest_modified,
+        "last_modified_display": _format_timestamp(latest_modified),
+    }
+
+
+def list_model_bundles() -> List[Dict[str, Any]]:
+    s3_client = get_models_s3_client()
+    continuation_token: Optional[str] = None
+    grouped: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    while True:
+        params: Dict[str, Any] = {"Bucket": MODELS_BUCKET}
+        if continuation_token:
+            params["ContinuationToken"] = continuation_token
+        response = s3_client.list_objects_v2(**params)
+        for item in response.get("Contents", []):
+            summary = _s3_object_summary(item)
+            if summary is None:
+                continue
+            grouped[summary["bundle_name"]].append(summary)
+        if not response.get("IsTruncated"):
+            break
+        continuation_token = str(response.get("NextContinuationToken") or "")
+        if not continuation_token:
+            raise ValueError("Truncated S3 listing missing continuation token")
+    return [_bundle_row(bundle_name, files) for bundle_name, files in grouped.items()]
+
+
+def _model_bundle_csv_row(bundle: Dict[str, Any]) -> Dict[str, Any]:
+    model_file = bundle.get("model_file") or {}
+    labels_file = bundle.get("labels_file") or {}
+    return {
+        "bundle_name": bundle.get("bundle_name", ""),
+        "files_present": bundle.get("files_present", ""),
+        "model_url": model_file.get("download_url", ""),
+        "labels_url": labels_file.get("download_url", ""),
+        "model_size": model_file.get("size_display", ""),
+        "labels_size": labels_file.get("size_display", ""),
+        "last_modified": bundle.get("last_modified_display", ""),
+    }
+
+
+def upload_model_bundle(model_id: str, model_file: Any, labels_file: Any) -> None:
+    bundle_name = _validate_bundle_name(model_id)
     if not model_file or not getattr(model_file, "filename", ""):
         raise ValueError("model.hef is required")
     if not labels_file or not getattr(labels_file, "filename", ""):
         raise ValueError("labels.txt is required")
 
     s3_client = get_models_s3_client()
-    uploaded_at = datetime.now(timezone.utc).isoformat()
-    model_sha256 = _compute_stream_sha256(model_file)
-    labels_sha256 = _compute_stream_sha256(labels_file)
     model_file.stream.seek(0)
     labels_file.stream.seek(0)
-    model_key = _bundle_key(model_id, MODEL_FILENAME)
-    labels_key = _bundle_key(model_id, LABELS_FILENAME)
+    model_key = _bundle_key(bundle_name, MODEL_FILENAME)
+    labels_key = _bundle_key(bundle_name, LABELS_FILENAME)
     s3_client.upload_fileobj(
         model_file.stream,
         MODELS_BUCKET,
@@ -488,30 +567,24 @@ def upload_model_bundle(model_id: str, model_file: Any, labels_file: Any) -> Dic
         labels_key,
         ExtraArgs={"ContentType": "text/plain"},
     )
-    model_head = _normalize_s3_head(s3_client.head_object(Bucket=MODELS_BUCKET, Key=model_key))
-    labels_head = _normalize_s3_head(s3_client.head_object(Bucket=MODELS_BUCKET, Key=labels_key))
-    provenance = {
-        "bundle_uploaded_at": uploaded_at,
-        "model_id": model_id,
-        "bundle_key_model": model_key,
-        "bundle_key_labels": labels_key,
-        "model_sha256": model_sha256,
-        "labels_sha256": labels_sha256,
-        "model_etag": model_head["etag"],
-        "labels_etag": labels_head["etag"],
-    }
-    if "version_id" in model_head:
-        provenance["model_version_id"] = model_head["version_id"]
-    if "version_id" in labels_head:
-        provenance["labels_version_id"] = labels_head["version_id"]
-    return provenance
 
 
 def delete_model_bundle(model_id: str) -> int:
     s3_client = get_models_s3_client()
-    prefix = f"{model_id}/"
-    response = s3_client.list_objects_v2(Bucket=MODELS_BUCKET, Prefix=prefix)
-    objects = [{"Key": obj["Key"]} for obj in response.get("Contents", [])]
+    prefix = f"{_validate_bundle_name(model_id)}/"
+    continuation_token: Optional[str] = None
+    objects: List[Dict[str, str]] = []
+    while True:
+        params: Dict[str, Any] = {"Bucket": MODELS_BUCKET, "Prefix": prefix}
+        if continuation_token:
+            params["ContinuationToken"] = continuation_token
+        response = s3_client.list_objects_v2(**params)
+        objects.extend({"Key": str(obj["Key"])} for obj in response.get("Contents", []))
+        if not response.get("IsTruncated"):
+            break
+        continuation_token = str(response.get("NextContinuationToken") or "")
+        if not continuation_token:
+            raise ValueError("Truncated S3 delete listing missing continuation token")
     if not objects:
         return 0
     s3_client.delete_objects(Bucket=MODELS_BUCKET, Delete={"Objects": objects, "Quiet": True})
@@ -861,12 +934,6 @@ def _normalize_environment_row(item: Dict[str, Any]) -> Dict[str, Any]:
     return normalized
 
 
-def _normalize_model_row(item: Dict[str, Any]) -> Dict[str, Any]:
-    normalized = dict(item)
-    normalized["timestamp"] = _format_timestamp(item.get("timestamp"))
-    return normalized
-
-
 def _normalize_deployment_row(item: Dict[str, Any], devices: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
     normalized = dict(item)
     normalized["start_time"] = _format_timestamp(item.get("start_time"))
@@ -876,27 +943,10 @@ def _normalize_deployment_row(item: Dict[str, Any], devices: Optional[List[Dict[
     return normalized
 
 
-def _model_bundle_metadata(item: Dict[str, Any]) -> Dict[str, Any]:
-    metadata = item.get("metadata")
-    if isinstance(metadata, dict):
-        bundle = metadata.get("bundle")
-        if isinstance(bundle, dict):
-            return bundle
-    return {}
-
-
 def _model_form_defaults() -> Dict[str, Any]:
     return {
-        "model_id": request.form.get("model_id", ""),
-        "name": request.form.get("name", ""),
-        "version": request.form.get("version", ""),
-        "description": request.form.get("description", ""),
-        "metadata": request.form.get("metadata", ""),
+        "bundle_name": request.form.get("bundle_name", ""),
     }
-
-
-def _short_hash(value: str) -> str:
-    return value[:12] if value else ""
 
 
 def _visible_columns(
@@ -972,6 +1022,10 @@ def _count_heartbeats() -> int:
 
 def _count_deployments() -> int:
     return len(_all_deployments())
+
+
+def _count_model_bundles() -> int:
+    return len(list_model_bundles())
 
 
 def _table_context(
@@ -1081,8 +1135,9 @@ def _local_csv_rows(table_name: str) -> List[Dict[str, Any]]:
             item["device_id"] = device_names.get(raw_device_id, _truncate_identifier(raw_device_id))
         return rows
     if table_name == "models":
-        rows = _fetch_all_paginated(api.fetch_models, sort_by=sort_by, sort_desc=sort_desc)
-        return [_normalize_model_row(item) for item in rows]
+        model_sort_by = sort_by if sort_by != "timestamp" else "last_modified_time"
+        rows = _sort_local_rows(list_model_bundles(), model_sort_by, sort_desc)
+        return [_model_bundle_csv_row(item) for item in rows]
     if table_name == "videos":
         if not device_id:
             return []
@@ -1157,7 +1212,7 @@ def index() -> str:
             {"name": "Classifications", "count": api.count_classifications(), "endpoint": "view_classifications"},
             {"name": "Devices", "count": _count_devices(), "endpoint": "view_devices"},
             {"name": "Heartbeats", "count": _count_heartbeats(), "endpoint": "view_heartbeats"},
-            {"name": "Models", "count": api.count_models(), "endpoint": "view_models"},
+            {"name": "Models", "count": _count_model_bundles(), "endpoint": "view_models"},
             {"name": "Videos", "count": api.count_videos(), "endpoint": "view_videos"},
             {"name": "Deployments", "count": _count_deployments(), "endpoint": "view_deployments"},
             {"name": "Environmental Readings", "count": api.count_environment(), "endpoint": "view_environment"},
@@ -1492,75 +1547,40 @@ def view_models() -> str:
     search_query = _get_search_query()
     limit = _get_limit()
     page = _get_page()
-    sort_by, sort_desc = _get_sort("timestamp", True)
-    token_history = request.args.get("token_history", "")
+    sort_by, sort_desc = _get_sort("last_modified_time", True)
+    sort_columns = _visible_columns(MODEL_COLUMNS, [], include_extra_columns=False)
     try:
-        if search_query:
-            rows = [
-                _normalize_model_row(item)
-                for item in _fetch_all_paginated(
-                    api.fetch_models,
-                    sort_by=sort_by,
-                    sort_desc=sort_desc,
-                )
-            ]
-            for row in rows:
-                bundle = _model_bundle_metadata(row)
-                if bundle:
-                    row["bundle_uploaded_at"] = bundle.get("bundle_uploaded_at")
-                    row["model_sha256"] = _short_hash(str(bundle.get("model_sha256", "")))
-                    row["labels_sha256"] = _short_hash(str(bundle.get("labels_sha256", "")))
-            rows = _filter_rows_by_search(rows, search_query)
-            paged = _local_pagination(rows, "view_models", page, limit)
-            visible_columns = _visible_columns(MODEL_COLUMNS, paged["items"])
-            return render_template(
-                "models.html",
-                title="Models",
-                description="Model registry plus bundle metadata. Upload/delete stays here.",
-                rows=paged["items"],
-                columns=visible_columns,
-                sort_by=sort_by,
-                sort_desc=sort_desc,
-                sort_urls=_build_sort_urls(visible_columns, "view_models", sort_by, sort_desc),
-                pagination=paged["pagination"],
-                total_count=paged["count"],
-                count=len(paged["items"]),
-                web_read_only=WEB_READ_ONLY,
-                export_url=_build_export_url("models"),
-                search_query=search_query,
-            )
-        response = api.fetch_models(
-            limit=limit,
-            next_token=request.args.get("next_token"),
-            sort_by=sort_by,
-            sort_desc=sort_desc,
-        )
-        rows = [_normalize_model_row(item) for item in response.get("items", [])]
-        for row in rows:
-            bundle = _model_bundle_metadata(row)
-            if bundle:
-                row["bundle_uploaded_at"] = bundle.get("bundle_uploaded_at")
-                row["model_sha256"] = _short_hash(str(bundle.get("model_sha256", "")))
-                row["labels_sha256"] = _short_hash(str(bundle.get("labels_sha256", "")))
-        visible_columns = _visible_columns(MODEL_COLUMNS, rows)
+        rows = _sort_local_rows(list_model_bundles(), sort_by, sort_desc)
+        rows = _filter_rows_by_search(rows, search_query)
+        paged = _local_pagination(rows, "view_models", page, limit)
         return render_template(
             "models.html",
             title="Models",
-            description="Model registry plus bundle metadata. Upload/delete stays here.",
-            rows=rows,
-            columns=visible_columns,
+            description=f"S3-backed model bundles from {MODELS_BUCKET}.",
+            bundles=paged["items"],
             sort_by=sort_by,
             sort_desc=sort_desc,
-            sort_urls=_build_sort_urls(visible_columns, "view_models", sort_by, sort_desc),
-            pagination=_token_pagination(response.get("next_token"), "view_models", page, token_history),
-            total_count=api.count_models(),
-            count=response.get("count", len(rows)),
+            sort_urls=_build_sort_urls(sort_columns, "view_models", sort_by, sort_desc),
+            pagination=paged["pagination"],
+            total_count=paged["count"],
+            count=len(paged["items"]),
             web_read_only=WEB_READ_ONLY,
             export_url=_build_export_url("models"),
             search_query=search_query,
         )
     except Exception as exc:
-        return render_template("models.html", rows=[], columns=MODEL_COLUMNS, error=str(exc), sort_urls={}, pagination={})
+        return render_template(
+            "models.html",
+            bundles=[],
+            error=str(exc),
+            sort_urls={},
+            pagination={},
+            total_count=0,
+            count=0,
+            web_read_only=WEB_READ_ONLY,
+            export_url=_build_export_url("models"),
+            search_query=search_query,
+        )
 
 
 @app.route("/videos")
@@ -1820,36 +1840,14 @@ def add_model() -> Any:
 def add_model_submit() -> Any:
     if WEB_READ_ONLY:
         return render_template("error.html", error="Model management is disabled in read-only mode"), 403
-    uploaded_bundle = False
-    model_id = request.form.get("model_id", "")
     try:
-        model_data = {
-            "model_id": request.form["model_id"],
-            "name": request.form["name"],
-            "version": request.form["version"],
-            "description": request.form.get("description", ""),
-        }
-        metadata = request.form.get("metadata")
-        if metadata:
-            model_data["metadata"] = json.loads(metadata)
-
-        bundle_metadata = upload_model_bundle(
-            model_data["model_id"],
+        upload_model_bundle(
+            request.form.get("bundle_name", ""),
             request.files.get("model_file"),
             request.files.get("labels_file"),
         )
-        uploaded_bundle = True
-        merged_metadata = dict(model_data.get("metadata") or {})
-        merged_metadata["bundle"] = bundle_metadata
-        model_data["metadata"] = merged_metadata
-        api.create_model(model_data)
         return redirect(url_for("view_models"))
     except Exception as exc:
-        if uploaded_bundle and model_id:
-            try:
-                delete_model_bundle(model_id)
-            except Exception:
-                pass
         return (
             render_template(
                 "add_model.html",
@@ -1866,22 +1864,9 @@ def delete_model(model_id: str) -> Any:
         return render_template("error.html", error="Model deletion is disabled in read-only mode"), 403
     try:
         delete_model_bundle(model_id)
-        api.delete_model(model_id)
         return redirect(url_for("view_models"))
     except Exception as exc:
-        response = api.fetch_models(limit=DEFAULT_PAGE_LIMIT, sort_by="timestamp", sort_desc=True)
-        rows = [_normalize_model_row(item) for item in response.get("items", [])]
-        return render_template(
-            "models.html",
-            rows=rows,
-            columns=_visible_columns(MODEL_COLUMNS, rows),
-            error=str(exc),
-            sort_urls={},
-            pagination={},
-            total_count=api.count_models(),
-            count=response.get("count", len(rows)),
-            web_read_only=WEB_READ_ONLY,
-        )
+        return render_template("error.html", error=str(exc)), 500
 
 
 @app.route("/admin")
