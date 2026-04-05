@@ -75,13 +75,13 @@
 </div>
 {% endif %}
 
-{% if filters %}
 <form method="get" class="filter-panel">
     <div class="form-row">
         <div class="form-group col-md-3">
             <label for="table-search">Search</label>
-            <input type="text" class="form-control form-control-sm" id="table-search" placeholder="Search...">
+            <input type="text" class="form-control form-control-sm" id="table-search" name="search" placeholder="Search..." value="{{ search_query or '' }}">
         </div>
+        {% if filters %}
         {% for filter in filters %}
         <div class="form-group col-md-3">
             <label for="{{ filter.name }}">{{ filter.label }}</label>
@@ -99,6 +99,7 @@
             {% endif %}
         </div>
         {% endfor %}
+        {% endif %}
     </div>
     <div class="form-row">
         <div class="form-group col-md-6 d-flex align-items-end">
@@ -110,28 +111,6 @@
         </div>
     </div>
 </form>
-{% elif export_url %}
-<div class="mb-3">
-    <a href="{{ export_url }}" target="_blank" rel="noopener noreferrer" class="btn btn-sm btn-outline-success">Download CSV</a>
-</div>
-<div class="filter-panel">
-    <div class="form-row">
-        <div class="form-group col-md-3 mb-0">
-            <label for="table-search">Search</label>
-            <input type="text" class="form-control form-control-sm" id="table-search" placeholder="Search...">
-        </div>
-    </div>
-</div>
-{% else %}
-<div class="filter-panel">
-    <div class="form-row">
-        <div class="form-group col-md-3 mb-0">
-            <label for="table-search">Search</label>
-            <input type="text" class="form-control form-control-sm" id="table-search" placeholder="Search...">
-        </div>
-    </div>
-</div>
-{% endif %}
 
 <div class="summary-bar">
     Showing {{ count }} row(s){% if total_count is not none %} of {{ total_count }}{% endif %}.
@@ -188,35 +167,4 @@
     </div>
 </div>
 {% endif %}
-{% endblock %}
-
-{% block scripts %}
-<script>
-    (function () {
-        var searchInput = document.getElementById('table-search');
-        var tableBody = document.querySelector('.table-admin tbody');
-        if (!searchInput || !tableBody) {
-            return;
-        }
-
-        function applyTableSearch() {
-            var query = searchInput.value.trim().toLowerCase();
-            var rows = tableBody.querySelectorAll('tr');
-            rows.forEach(function (row) {
-                var text = row.textContent.toLowerCase();
-                var isMatch = !query || text.indexOf(query) !== -1;
-                row.style.display = isMatch ? '' : 'none';
-            });
-        }
-
-        searchInput.addEventListener('input', applyTableSearch);
-
-        var resetLink = document.querySelector('.filter-panel a.btn-outline-secondary');
-        if (resetLink) {
-            resetLink.addEventListener('click', function () {
-                searchInput.value = '';
-            });
-        }
-    }());
-</script>
 {% endblock %}

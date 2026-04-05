@@ -622,6 +622,28 @@ def _fetch_all_paginated(fetcher: Callable[..., Dict[str, Any]], **kwargs: Any) 
             return items
 
 
+def _get_search_query() -> str:
+    return request.args.get("search", "").strip()
+
+
+def _row_matches_search(row: Dict[str, Any], search_query: str) -> bool:
+    if not search_query:
+        return True
+    needle = search_query.lower()
+    for key, value in row.items():
+        if key.startswith("_") or key.endswith("_url") or key.endswith("_preview"):
+            continue
+        if needle in _stringify_csv_value(value).lower():
+            return True
+    return False
+
+
+def _filter_rows_by_search(rows: List[Dict[str, Any]], search_query: str) -> List[Dict[str, Any]]:
+    if not search_query:
+        return rows
+    return [row for row in rows if _row_matches_search(row, search_query)]
+
+
 def _json_pretty(value: Any) -> str:
     if value in (None, ""):
         return ""
@@ -832,6 +854,16 @@ def _model_bundle_metadata(item: Dict[str, Any]) -> Dict[str, Any]:
     return {}
 
 
+def _model_form_defaults() -> Dict[str, Any]:
+    return {
+        "model_id": request.form.get("model_id", ""),
+        "name": request.form.get("name", ""),
+        "version": request.form.get("version", ""),
+        "description": request.form.get("description", ""),
+        "metadata": request.form.get("metadata", ""),
+    }
+
+
 def _short_hash(value: str) -> str:
     return value[:12] if value else ""
 
@@ -927,6 +959,7 @@ def _table_context(
     info_message: Optional[str] = None,
     include_extra_columns: bool = True,
     export_url: Optional[str] = None,
+    search_query: str = "",
 ) -> Dict[str, Any]:
     columns = _visible_columns(columns, rows, include_extra_columns=include_extra_columns)
     return {
@@ -944,6 +977,7 @@ def _table_context(
         "total_count": total_count if total_count is not None else count,
         "info_message": info_message,
         "export_url": export_url,
+        "search_query": search_query,
     }
 
 
@@ -1087,37 +1121,71 @@ def index() -> str:
 @app.route("/tracks")
 def view_tracks() -> str:
     device_id = request.args.get("device_id") or None
+    search_query = _get_search_query()
     limit = _get_limit()
     page = _get_page()
     sort_by, sort_desc = _get_sort("timestamp", True)
     token_history = request.args.get("token_history", "")
     try:
-        response = api.fetch_tracks(
-            device_id=device_id,
-            limit=limit,
-            next_token=request.args.get("next_token"),
-            sort_by=sort_by,
-            sort_desc=sort_desc,
-        )
-        rows = [_normalize_track_row(item) for item in response.get("items", [])]
-        context = _table_context(
-            title="Tracks",
-            description="Inspectable track records from the API.",
-            endpoint="view_tracks",
-            rows=rows,
-            columns=TRACK_COLUMNS,
-            sort_by=sort_by,
-            sort_desc=sort_desc,
-            pagination=_token_pagination(response.get("next_token"), "view_tracks", page, token_history),
-            filters=[
-                {"name": "device_id", "label": "Device ID", "value": device_id or "", "options": _device_ids()},
-                {"name": "limit", "label": "Rows", "value": str(limit), "options": ["25", "50", "100", "200"]},
-            ],
-            count=response.get("count", len(rows)),
-            total_count=api.count_tracks(device_id=device_id),
-            include_extra_columns=False,
-            export_url=_build_export_url("tracks"),
-        )
+        if search_query:
+            rows = [
+                _normalize_track_row(item)
+                for item in _fetch_all_paginated(
+                    api.fetch_tracks,
+                    device_id=device_id,
+                    sort_by=sort_by,
+                    sort_desc=sort_desc,
+                )
+            ]
+            rows = _filter_rows_by_search(rows, search_query)
+            paged = _local_pagination(rows, "view_tracks", page, limit)
+            context = _table_context(
+                title="Tracks",
+                description="Inspectable track records from the API.",
+                endpoint="view_tracks",
+                rows=paged["items"],
+                columns=TRACK_COLUMNS,
+                sort_by=sort_by,
+                sort_desc=sort_desc,
+                pagination=paged["pagination"],
+                filters=[
+                    {"name": "device_id", "label": "Device ID", "value": device_id or "", "options": _device_ids()},
+                    {"name": "limit", "label": "Rows", "value": str(limit), "options": ["25", "50", "100", "200"]},
+                ],
+                count=len(paged["items"]),
+                total_count=paged["count"],
+                include_extra_columns=False,
+                export_url=_build_export_url("tracks"),
+                search_query=search_query,
+            )
+        else:
+            response = api.fetch_tracks(
+                device_id=device_id,
+                limit=limit,
+                next_token=request.args.get("next_token"),
+                sort_by=sort_by,
+                sort_desc=sort_desc,
+            )
+            rows = [_normalize_track_row(item) for item in response.get("items", [])]
+            context = _table_context(
+                title="Tracks",
+                description="Inspectable track records from the API.",
+                endpoint="view_tracks",
+                rows=rows,
+                columns=TRACK_COLUMNS,
+                sort_by=sort_by,
+                sort_desc=sort_desc,
+                pagination=_token_pagination(response.get("next_token"), "view_tracks", page, token_history),
+                filters=[
+                    {"name": "device_id", "label": "Device ID", "value": device_id or "", "options": _device_ids()},
+                    {"name": "limit", "label": "Rows", "value": str(limit), "options": ["25", "50", "100", "200"]},
+                ],
+                count=response.get("count", len(rows)),
+                total_count=api.count_tracks(device_id=device_id),
+                include_extra_columns=False,
+                export_url=_build_export_url("tracks"),
+                search_query=search_query,
+            )
         return render_template("table.html", **context)
     except Exception as exc:
         return render_template("error.html", error=str(exc))
@@ -1144,6 +1212,7 @@ def view_track_detail(track_id: str) -> str:
 def view_classifications() -> str:
     device_id = request.args.get("device_id") or None
     track_id = request.args.get("track_id") or None
+    search_query = _get_search_query()
     limit = _get_limit()
     sort_by, sort_desc = _get_sort("timestamp", True)
     try:
@@ -1155,6 +1224,7 @@ def view_classifications() -> str:
                 raise ValueError(f"Track {track_id} was not found")
             rows = [_normalize_classification_row(item) for item in _all_classifications_for_device(device_id, sort_by, sort_desc)]
             rows = [row for row in rows if row.get("track_id") == track_id]
+            rows = _filter_rows_by_search(rows, search_query)
             paged = _local_pagination(rows, "view_classifications", _get_page(), limit)
             context = _table_context(
                 title="Classifications",
@@ -1173,6 +1243,7 @@ def view_classifications() -> str:
                 count=len(paged["items"]),
                 total_count=paged["count"],
                 export_url=_build_export_url("classifications"),
+                search_query=search_query,
             )
         elif not device_id:
             context = _table_context(
@@ -1193,36 +1264,70 @@ def view_classifications() -> str:
                 total_count=0,
                 info_message="Select a device to view classifications.",
                 export_url=None,
+                search_query=search_query,
             )
         else:
             page = _get_page()
             token_history = request.args.get("token_history", "")
-            response = api.fetch_classifications(
-                device_id=device_id,
-                limit=limit,
-                next_token=request.args.get("next_token"),
-                sort_by=sort_by,
-                sort_desc=sort_desc,
-            )
-            rows = [_normalize_classification_row(item) for item in response.get("items", [])]
-            context = _table_context(
-                title="Classifications",
-                description="All classification rows, with device and track filtering.",
-                endpoint="view_classifications",
-                rows=rows,
-                columns=CLASSIFICATION_COLUMNS,
-                sort_by=sort_by,
-                sort_desc=sort_desc,
-                pagination=_token_pagination(response.get("next_token"), "view_classifications", page, token_history),
-                filters=[
-                    {"name": "device_id", "label": "Device ID", "value": device_id or "", "options": _device_ids()},
-                    {"name": "track_id", "label": "Track ID", "value": "", "type": "text"},
-                    {"name": "limit", "label": "Rows", "value": str(limit), "options": ["25", "50", "100", "200"]},
-                ],
-                count=response.get("count", len(rows)),
-                total_count=api.count_classifications(device_id=device_id),
-                export_url=_build_export_url("classifications"),
-            )
+            if search_query:
+                rows = [
+                    _normalize_classification_row(item)
+                    for item in _fetch_all_paginated(
+                        api.fetch_classifications,
+                        device_id=device_id,
+                        sort_by=sort_by,
+                        sort_desc=sort_desc,
+                    )
+                ]
+                rows = _filter_rows_by_search(rows, search_query)
+                paged = _local_pagination(rows, "view_classifications", page, limit)
+                context = _table_context(
+                    title="Classifications",
+                    description="All classification rows, with device and track filtering.",
+                    endpoint="view_classifications",
+                    rows=paged["items"],
+                    columns=CLASSIFICATION_COLUMNS,
+                    sort_by=sort_by,
+                    sort_desc=sort_desc,
+                    pagination=paged["pagination"],
+                    filters=[
+                        {"name": "device_id", "label": "Device ID", "value": device_id or "", "options": _device_ids()},
+                        {"name": "track_id", "label": "Track ID", "value": "", "type": "text"},
+                        {"name": "limit", "label": "Rows", "value": str(limit), "options": ["25", "50", "100", "200"]},
+                    ],
+                    count=len(paged["items"]),
+                    total_count=paged["count"],
+                    export_url=_build_export_url("classifications"),
+                    search_query=search_query,
+                )
+            else:
+                response = api.fetch_classifications(
+                    device_id=device_id,
+                    limit=limit,
+                    next_token=request.args.get("next_token"),
+                    sort_by=sort_by,
+                    sort_desc=sort_desc,
+                )
+                rows = [_normalize_classification_row(item) for item in response.get("items", [])]
+                context = _table_context(
+                    title="Classifications",
+                    description="All classification rows, with device and track filtering.",
+                    endpoint="view_classifications",
+                    rows=rows,
+                    columns=CLASSIFICATION_COLUMNS,
+                    sort_by=sort_by,
+                    sort_desc=sort_desc,
+                    pagination=_token_pagination(response.get("next_token"), "view_classifications", page, token_history),
+                    filters=[
+                        {"name": "device_id", "label": "Device ID", "value": device_id or "", "options": _device_ids()},
+                        {"name": "track_id", "label": "Track ID", "value": "", "type": "text"},
+                        {"name": "limit", "label": "Rows", "value": str(limit), "options": ["25", "50", "100", "200"]},
+                    ],
+                    count=response.get("count", len(rows)),
+                    total_count=api.count_classifications(device_id=device_id),
+                    export_url=_build_export_url("classifications"),
+                    search_query=search_query,
+                )
         return render_template("table.html", **context)
     except Exception as exc:
         return render_template("error.html", error=str(exc))
@@ -1231,36 +1336,69 @@ def view_classifications() -> str:
 @app.route("/devices")
 def view_devices() -> str:
     device_id = request.args.get("device_id") or None
+    search_query = _get_search_query()
     limit = _get_limit()
     page = _get_page()
     sort_by, sort_desc = _get_sort("device_id", False)
     token_history = request.args.get("token_history", "")
     try:
-        response = api.fetch_devices(
-            device_id=device_id,
-            limit=limit,
-            next_token=request.args.get("next_token"),
-            sort_by=sort_by,
-            sort_desc=sort_desc,
-        )
-        rows = [_normalize_device_row(item) for item in response.get("items", [])]
-        context = _table_context(
-            title="Devices",
-            description="Registered devices. Flicks have no parent; dots do.",
-            endpoint="view_devices",
-            rows=rows,
-            columns=DEVICE_COLUMNS,
-            sort_by=sort_by,
-            sort_desc=sort_desc,
-            pagination=_token_pagination(response.get("next_token"), "view_devices", page, token_history),
-            filters=[
-                {"name": "device_id", "label": "Device ID", "value": device_id or "", "options": _device_ids()},
-                {"name": "limit", "label": "Rows", "value": str(limit), "options": ["25", "50", "100", "200"]},
-            ],
-            count=response.get("count", len(rows)),
-            total_count=_count_devices(),
-            export_url=_build_export_url("devices"),
-        )
+        if search_query:
+            rows = [
+                _normalize_device_row(item)
+                for item in _fetch_all_paginated(
+                    api.fetch_devices,
+                    device_id=device_id,
+                    sort_by=sort_by,
+                    sort_desc=sort_desc,
+                )
+            ]
+            rows = _filter_rows_by_search(rows, search_query)
+            paged = _local_pagination(rows, "view_devices", page, limit)
+            context = _table_context(
+                title="Devices",
+                description="Registered devices. Flicks have no parent; dots do.",
+                endpoint="view_devices",
+                rows=paged["items"],
+                columns=DEVICE_COLUMNS,
+                sort_by=sort_by,
+                sort_desc=sort_desc,
+                pagination=paged["pagination"],
+                filters=[
+                    {"name": "device_id", "label": "Device ID", "value": device_id or "", "options": _device_ids()},
+                    {"name": "limit", "label": "Rows", "value": str(limit), "options": ["25", "50", "100", "200"]},
+                ],
+                count=len(paged["items"]),
+                total_count=paged["count"],
+                export_url=_build_export_url("devices"),
+                search_query=search_query,
+            )
+        else:
+            response = api.fetch_devices(
+                device_id=device_id,
+                limit=limit,
+                next_token=request.args.get("next_token"),
+                sort_by=sort_by,
+                sort_desc=sort_desc,
+            )
+            rows = [_normalize_device_row(item) for item in response.get("items", [])]
+            context = _table_context(
+                title="Devices",
+                description="Registered devices. Flicks have no parent; dots do.",
+                endpoint="view_devices",
+                rows=rows,
+                columns=DEVICE_COLUMNS,
+                sort_by=sort_by,
+                sort_desc=sort_desc,
+                pagination=_token_pagination(response.get("next_token"), "view_devices", page, token_history),
+                filters=[
+                    {"name": "device_id", "label": "Device ID", "value": device_id or "", "options": _device_ids()},
+                    {"name": "limit", "label": "Rows", "value": str(limit), "options": ["25", "50", "100", "200"]},
+                ],
+                count=response.get("count", len(rows)),
+                total_count=_count_devices(),
+                export_url=_build_export_url("devices"),
+                search_query=search_query,
+            )
         return render_template("table.html", **context)
     except Exception as exc:
         return render_template("error.html", error=str(exc))
@@ -1268,6 +1406,7 @@ def view_devices() -> str:
 
 @app.route("/heartbeats")
 def view_heartbeats() -> str:
+    search_query = _get_search_query()
     sort_by, sort_desc = _get_sort("timestamp", True)
     try:
         response = api.fetch_heartbeats()
@@ -1277,19 +1416,22 @@ def view_heartbeats() -> str:
             raw_device_id = str(item.get("device_id") or "")
             item["_device_id_raw"] = raw_device_id
             item["device_id"] = device_names.get(raw_device_id, _truncate_identifier(raw_device_id))
+        items = _filter_rows_by_search(items, search_query)
+        paged = _local_pagination(items, "view_heartbeats", _get_page(), _get_limit())
         context = _table_context(
             title="Heartbeats",
             description="Latest heartbeat per device.",
             endpoint="view_heartbeats",
-            rows=items,
+            rows=paged["items"],
             columns=HEARTBEAT_COLUMNS,
             sort_by=sort_by,
             sort_desc=sort_desc,
-            pagination={},
+            pagination=paged["pagination"],
             filters=[],
-            count=len(items),
-            total_count=len(items),
+            count=len(paged["items"]),
+            total_count=paged["count"],
             export_url=_build_export_url("heartbeats"),
+            search_query=search_query,
         )
         return render_template("table.html", **context)
     except Exception as exc:
@@ -1298,11 +1440,46 @@ def view_heartbeats() -> str:
 
 @app.route("/models")
 def view_models() -> str:
+    search_query = _get_search_query()
     limit = _get_limit()
     page = _get_page()
     sort_by, sort_desc = _get_sort("timestamp", True)
     token_history = request.args.get("token_history", "")
     try:
+        if search_query:
+            rows = [
+                _normalize_model_row(item)
+                for item in _fetch_all_paginated(
+                    api.fetch_models,
+                    sort_by=sort_by,
+                    sort_desc=sort_desc,
+                )
+            ]
+            for row in rows:
+                bundle = _model_bundle_metadata(row)
+                if bundle:
+                    row["bundle_uploaded_at"] = bundle.get("bundle_uploaded_at")
+                    row["model_sha256"] = _short_hash(str(bundle.get("model_sha256", "")))
+                    row["labels_sha256"] = _short_hash(str(bundle.get("labels_sha256", "")))
+            rows = _filter_rows_by_search(rows, search_query)
+            paged = _local_pagination(rows, "view_models", page, limit)
+            visible_columns = _visible_columns(MODEL_COLUMNS, paged["items"])
+            return render_template(
+                "models.html",
+                title="Models",
+                description="Model registry plus bundle metadata. Upload/delete stays here.",
+                rows=paged["items"],
+                columns=visible_columns,
+                sort_by=sort_by,
+                sort_desc=sort_desc,
+                sort_urls=_build_sort_urls(visible_columns, "view_models", sort_by, sort_desc),
+                pagination=paged["pagination"],
+                total_count=paged["count"],
+                count=len(paged["items"]),
+                web_read_only=WEB_READ_ONLY,
+                export_url=_build_export_url("models"),
+                search_query=search_query,
+            )
         response = api.fetch_models(
             limit=limit,
             next_token=request.args.get("next_token"),
@@ -1316,20 +1493,22 @@ def view_models() -> str:
                 row["bundle_uploaded_at"] = bundle.get("bundle_uploaded_at")
                 row["model_sha256"] = _short_hash(str(bundle.get("model_sha256", "")))
                 row["labels_sha256"] = _short_hash(str(bundle.get("labels_sha256", "")))
+        visible_columns = _visible_columns(MODEL_COLUMNS, rows)
         return render_template(
             "models.html",
             title="Models",
             description="Model registry plus bundle metadata. Upload/delete stays here.",
             rows=rows,
-            columns=_visible_columns(MODEL_COLUMNS, rows),
+            columns=visible_columns,
             sort_by=sort_by,
             sort_desc=sort_desc,
-            sort_urls=_build_sort_urls(_visible_columns(MODEL_COLUMNS, rows), "view_models", sort_by, sort_desc),
+            sort_urls=_build_sort_urls(visible_columns, "view_models", sort_by, sort_desc),
             pagination=_token_pagination(response.get("next_token"), "view_models", page, token_history),
             total_count=api.count_models(),
             count=response.get("count", len(rows)),
             web_read_only=WEB_READ_ONLY,
             export_url=_build_export_url("models"),
+            search_query=search_query,
         )
     except Exception as exc:
         return render_template("models.html", rows=[], columns=MODEL_COLUMNS, error=str(exc), sort_urls={}, pagination={})
@@ -1338,6 +1517,7 @@ def view_models() -> str:
 @app.route("/videos")
 def view_videos() -> str:
     device_id = request.args.get("device_id") or None
+    search_query = _get_search_query()
     limit = _get_limit()
     page = _get_page()
     sort_by, sort_desc = _get_sort("timestamp", True)
@@ -1361,33 +1541,66 @@ def view_videos() -> str:
                 total_count=0,
                 info_message="Select a device to view videos.",
                 export_url=None,
+                search_query=search_query,
             )
         else:
-            response = api.fetch_videos(
-                device_id=device_id,
-                limit=limit,
-                next_token=request.args.get("next_token"),
-                sort_by=sort_by,
-                sort_desc=sort_desc,
-            )
-            rows = [_normalize_video_row(item) for item in response.get("items", [])]
-            context = _table_context(
-                title="Videos",
-                description="Video records with presigned links when available.",
-                endpoint="view_videos",
-                rows=rows,
-                columns=VIDEO_COLUMNS,
-                sort_by=sort_by,
-                sort_desc=sort_desc,
-                pagination=_token_pagination(response.get("next_token"), "view_videos", page, token_history),
-                filters=[
-                    {"name": "device_id", "label": "Device ID", "value": device_id or "", "options": _device_ids()},
-                    {"name": "limit", "label": "Rows", "value": str(limit), "options": ["25", "50", "100", "200"]},
-                ],
-                count=response.get("count", len(rows)),
-                total_count=api.count_videos(device_id=device_id),
-                export_url=_build_export_url("videos"),
-            )
+            if search_query:
+                rows = [
+                    _normalize_video_row(item)
+                    for item in _fetch_all_paginated(
+                        api.fetch_videos,
+                        device_id=device_id,
+                        sort_by=sort_by,
+                        sort_desc=sort_desc,
+                    )
+                ]
+                rows = _filter_rows_by_search(rows, search_query)
+                paged = _local_pagination(rows, "view_videos", page, limit)
+                context = _table_context(
+                    title="Videos",
+                    description="Video records with presigned links when available.",
+                    endpoint="view_videos",
+                    rows=paged["items"],
+                    columns=VIDEO_COLUMNS,
+                    sort_by=sort_by,
+                    sort_desc=sort_desc,
+                    pagination=paged["pagination"],
+                    filters=[
+                        {"name": "device_id", "label": "Device ID", "value": device_id or "", "options": _device_ids()},
+                        {"name": "limit", "label": "Rows", "value": str(limit), "options": ["25", "50", "100", "200"]},
+                    ],
+                    count=len(paged["items"]),
+                    total_count=paged["count"],
+                    export_url=_build_export_url("videos"),
+                    search_query=search_query,
+                )
+            else:
+                response = api.fetch_videos(
+                    device_id=device_id,
+                    limit=limit,
+                    next_token=request.args.get("next_token"),
+                    sort_by=sort_by,
+                    sort_desc=sort_desc,
+                )
+                rows = [_normalize_video_row(item) for item in response.get("items", [])]
+                context = _table_context(
+                    title="Videos",
+                    description="Video records with presigned links when available.",
+                    endpoint="view_videos",
+                    rows=rows,
+                    columns=VIDEO_COLUMNS,
+                    sort_by=sort_by,
+                    sort_desc=sort_desc,
+                    pagination=_token_pagination(response.get("next_token"), "view_videos", page, token_history),
+                    filters=[
+                        {"name": "device_id", "label": "Device ID", "value": device_id or "", "options": _device_ids()},
+                        {"name": "limit", "label": "Rows", "value": str(limit), "options": ["25", "50", "100", "200"]},
+                    ],
+                    count=response.get("count", len(rows)),
+                    total_count=api.count_videos(device_id=device_id),
+                    export_url=_build_export_url("videos"),
+                    search_query=search_query,
+                )
         return render_template("table.html", **context)
     except Exception as exc:
         return render_template("error.html", error=str(exc))
@@ -1395,6 +1608,7 @@ def view_videos() -> str:
 
 @app.route("/deployments")
 def view_deployments() -> str:
+    search_query = _get_search_query()
     limit = _get_limit()
     page = _get_page()
     sort_by, sort_desc = _get_sort("start_time", True)
@@ -1410,19 +1624,45 @@ def view_deployments() -> str:
         for item in response.get("items", []):
             details = api.get_deployment(item["deployment_id"])
             rows.append(_normalize_deployment_row(details.get("deployment", item), details.get("devices", [])))
+        if search_query:
+            all_rows = rows
+            next_token = response.get("next_token")
+            while next_token:
+                extra_response = api.fetch_deployments(
+                    limit=FETCH_ALL_PAGE_LIMIT,
+                    next_token=next_token,
+                    sort_by=sort_by,
+                    sort_desc=sort_desc,
+                )
+                for item in extra_response.get("items", []):
+                    details = api.get_deployment(item["deployment_id"])
+                    all_rows.append(_normalize_deployment_row(details.get("deployment", item), details.get("devices", [])))
+                next_token = extra_response.get("next_token")
+            rows = _filter_rows_by_search(all_rows, search_query)
+            paged = _local_pagination(rows, "view_deployments", page, limit)
+            pagination = paged["pagination"]
+            visible_rows = paged["items"]
+            total_count = paged["count"]
+            page_count = len(visible_rows)
+        else:
+            pagination = _token_pagination(response.get("next_token"), "view_deployments", page, token_history)
+            visible_rows = rows
+            total_count = _count_deployments()
+            page_count = len(rows)
         context = _table_context(
             title="Deployments",
             description="Deployment records plus linked device assignments.",
             endpoint="view_deployments",
-            rows=rows,
+            rows=visible_rows,
             columns=DEPLOYMENT_COLUMNS,
             sort_by=sort_by,
             sort_desc=sort_desc,
-            pagination=_token_pagination(response.get("next_token"), "view_deployments", page, token_history),
+            pagination=pagination,
             filters=[{"name": "limit", "label": "Rows", "value": str(limit), "options": ["25", "50", "100", "200"]}],
-            count=len(rows),
-            total_count=_count_deployments(),
+            count=page_count,
+            total_count=total_count,
             export_url=_build_export_url("deployments"),
+            search_query=search_query,
         )
         return render_template("table.html", **context)
     except Exception as exc:
@@ -1432,36 +1672,69 @@ def view_deployments() -> str:
 @app.route("/environment")
 def view_environment() -> str:
     device_id = request.args.get("device_id") or None
+    search_query = _get_search_query()
     limit = _get_limit()
     page = _get_page()
     sort_by, sort_desc = _get_sort("timestamp", True)
     token_history = request.args.get("token_history", "")
     try:
-        response = api.fetch_environment(
-            device_id=device_id,
-            limit=limit,
-            next_token=request.args.get("next_token"),
-            sort_by=sort_by,
-            sort_desc=sort_desc,
-        )
-        rows = [_normalize_environment_row(item) for item in response.get("items", [])]
-        context = _table_context(
-            title="Environmental Readings",
-            description="Environmental readings returned by the backend API.",
-            endpoint="view_environment",
-            rows=rows,
-            columns=ENVIRONMENT_COLUMNS,
-            sort_by=sort_by,
-            sort_desc=sort_desc,
-            pagination=_token_pagination(response.get("next_token"), "view_environment", page, token_history),
-            filters=[
-                {"name": "device_id", "label": "Device ID", "value": device_id or "", "options": _device_ids()},
-                {"name": "limit", "label": "Rows", "value": str(limit), "options": ["25", "50", "100", "200"]},
-            ],
-            count=response.get("count", len(rows)),
-            total_count=api.count_environment(device_id=device_id),
-            export_url=_build_export_url("environment"),
-        )
+        if search_query:
+            rows = [
+                _normalize_environment_row(item)
+                for item in _fetch_all_paginated(
+                    api.fetch_environment,
+                    device_id=device_id,
+                    sort_by=sort_by,
+                    sort_desc=sort_desc,
+                )
+            ]
+            rows = _filter_rows_by_search(rows, search_query)
+            paged = _local_pagination(rows, "view_environment", page, limit)
+            context = _table_context(
+                title="Environmental Readings",
+                description="Environmental readings returned by the backend API.",
+                endpoint="view_environment",
+                rows=paged["items"],
+                columns=ENVIRONMENT_COLUMNS,
+                sort_by=sort_by,
+                sort_desc=sort_desc,
+                pagination=paged["pagination"],
+                filters=[
+                    {"name": "device_id", "label": "Device ID", "value": device_id or "", "options": _device_ids()},
+                    {"name": "limit", "label": "Rows", "value": str(limit), "options": ["25", "50", "100", "200"]},
+                ],
+                count=len(paged["items"]),
+                total_count=paged["count"],
+                export_url=_build_export_url("environment"),
+                search_query=search_query,
+            )
+        else:
+            response = api.fetch_environment(
+                device_id=device_id,
+                limit=limit,
+                next_token=request.args.get("next_token"),
+                sort_by=sort_by,
+                sort_desc=sort_desc,
+            )
+            rows = [_normalize_environment_row(item) for item in response.get("items", [])]
+            context = _table_context(
+                title="Environmental Readings",
+                description="Environmental readings returned by the backend API.",
+                endpoint="view_environment",
+                rows=rows,
+                columns=ENVIRONMENT_COLUMNS,
+                sort_by=sort_by,
+                sort_desc=sort_desc,
+                pagination=_token_pagination(response.get("next_token"), "view_environment", page, token_history),
+                filters=[
+                    {"name": "device_id", "label": "Device ID", "value": device_id or "", "options": _device_ids()},
+                    {"name": "limit", "label": "Rows", "value": str(limit), "options": ["25", "50", "100", "200"]},
+                ],
+                count=response.get("count", len(rows)),
+                total_count=api.count_environment(device_id=device_id),
+                export_url=_build_export_url("environment"),
+                search_query=search_query,
+            )
         return render_template("table.html", **context)
     except Exception as exc:
         return render_template("error.html", error=str(exc))
@@ -1491,7 +1764,7 @@ def image_proxy() -> Any:
 def add_model() -> Any:
     if WEB_READ_ONLY:
         return render_template("error.html", error="Model management is disabled in read-only mode"), 403
-    return render_template("add_model.html")
+    return render_template("add_model.html", form_values=_model_form_defaults())
 
 
 @app.route("/add_model", methods=["POST"])
@@ -1528,7 +1801,14 @@ def add_model_submit() -> Any:
                 delete_model_bundle(model_id)
             except Exception:
                 pass
-        return render_template("add_model.html", error=str(exc))
+        return (
+            render_template(
+                "add_model.html",
+                error=str(exc),
+                form_values=_model_form_defaults(),
+            ),
+            400,
+        )
 
 
 @app.route("/models/<model_id>/delete", methods=["POST"])

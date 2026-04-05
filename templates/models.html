@@ -35,6 +35,29 @@
 <div class="alert alert-danger">{{ error }}</div>
 {% endif %}
 
+<form method="get" class="filter-panel">
+    <div class="form-row">
+        <div class="form-group col-md-3">
+            <label for="table-search">Search</label>
+            <input type="text" class="form-control form-control-sm" id="table-search" name="search" placeholder="Search..." value="{{ search_query or '' }}">
+        </div>
+        <div class="form-group col-md-3">
+            <label for="limit">Rows</label>
+            <select class="form-control form-control-sm" id="limit" name="limit">
+                {% for option in ["25", "50", "100", "200"] %}
+                <option value="{{ option }}" {% if request.args.get('limit', '50') == option %}selected{% endif %}>{{ option }}</option>
+                {% endfor %}
+            </select>
+        </div>
+    </div>
+    <div class="form-row">
+        <div class="form-group col-md-6 d-flex align-items-end">
+            <button type="submit" class="btn btn-sm btn-primary">Apply Filters</button>
+            <a href="{{ url_for('view_models') }}" class="btn btn-sm btn-outline-secondary">Reset</a>
+        </div>
+    </div>
+</form>
+
 <div class="summary-bar">
     Showing {{ count or 0 }} row(s){% if total_count is not none %} of {{ total_count }}{% endif %}.
 </div>

@@ -43,6 +43,8 @@
             --sg-code-text: #eef2ff;
             --sg-json-bg: #202538;
             --sg-json-text: #d9e2ff;
+            --sg-accent-dark: #d7ec9a;
+            --sg-accent-soft: #b6dc5d;
             --sg-shadow: rgba(0, 0, 0, 0.35);
         }
 
@@ -68,6 +70,28 @@
         .navbar-light .nav-link:hover,
         .navbar-light .nav-link:focus {
             color: var(--sg-accent-soft) !important;
+        }
+
+        html[data-theme="dark"] .navbar {
+            background: #1f2436 !important;
+        }
+
+        html[data-theme="dark"] .navbar-light .navbar-brand,
+        html[data-theme="dark"] .navbar-light .nav-link {
+            color: var(--sg-accent-dark) !important;
+        }
+
+        html[data-theme="dark"] .navbar-light .nav-link:hover,
+        html[data-theme="dark"] .navbar-light .nav-link:focus {
+            color: var(--sg-accent-soft) !important;
+        }
+
+        html[data-theme="dark"] .navbar-light .navbar-toggler {
+            border-color: var(--sg-border);
+        }
+
+        html[data-theme="dark"] .navbar-light .navbar-toggler-icon {
+            filter: invert(1) brightness(1.2);
         }
 
         .container-fluid {
