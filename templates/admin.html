@@ -28,7 +28,7 @@
                 <option value="{{ did }}">{{ did }}</option>
                 {% endfor %}
             </select>
-            <button id="load-counts-btn" class="btn btn-primary">Load Counts</button>
+            <button id="load-counts-btn" class="btn btn-sm btn-primary">Load Counts</button>
             <span id="counts-status" class="ml-3 text-muted small"></span>
         </div>
         <div id="counts-chart-container">
@@ -50,7 +50,7 @@
 
     <!-- Tab 3: S3 Orphan Detection -->
     <div class="tab-pane fade" id="orphans-pane" role="tabpanel">
-        <button id="run-orphan-check" class="btn btn-primary mb-3">Run Orphan Check</button>
+        <button id="run-orphan-check" class="btn btn-sm btn-primary mb-3">Run Orphan Check</button>
         <span id="orphan-status" class="ml-3 text-muted small"></span>
         <div id="orphan-results"></div>
     </div>
@@ -152,10 +152,11 @@ document.getElementById('load-counts-btn').addEventListener('click', function() 
         });
 
         // Color function: red >200, yellow 50-200, teal <50
+        var _cs = getComputedStyle(document.documentElement);
         function barColor(count) {
-            if (count > 200) return '#dc3545';
-            if (count >= 50) return '#ffc107';
-            return '#20c997';
+            if (count > 200) return _cs.getPropertyValue('--sg-status-danger').trim() || '#dc3545';
+            if (count >= 50) return _cs.getPropertyValue('--sg-status-warning').trim() || '#ffc107';
+            return _cs.getPropertyValue('--sg-status-success').trim() || '#20c997';
         }
 
         var datasets;
@@ -218,9 +219,7 @@ document.getElementById('load-counts-btn').addEventListener('click', function() 
             }
         });
 
-        // Set a reasonable height based on data
-        document.getElementById('counts-canvas').parentElement.style.height = '500px';
-        document.getElementById('counts-canvas').style.height = '500px';
+        document.getElementById('counts-canvas').parentElement.classList.add('chart-container');
         countsChart.resize();
     }, btn);
 });
@@ -242,7 +241,7 @@ document.getElementById('run-orphan-check').addEventListener('click', function()
         if (data.orphans && data.orphans.length > 0) {
             html += '<table class="table table-sm table-bordered table-striped"><thead><tr><th>Key</th><th>Size (bytes)</th><th>Last Modified</th></tr></thead><tbody>';
             data.orphans.forEach(function(o) {
-                html += '<tr><td class="text-truncate" style="max-width:400px" title="' + o.key + '"><a href="#" class="orphan-view-link" data-key="' + o.key + '">' + o.key + '</a></td><td>' + o.size + '</td><td>' + o.last_modified + '</td></tr>';
+                html += '<tr><td class="text-truncate truncate-cell" title="' + o.key + '"><a href="#" class="orphan-view-link" data-key="' + o.key + '">' + o.key + '</a></td><td>' + o.size + '</td><td>' + o.last_modified + '</td></tr>';
             });
             html += '</tbody></table>';
             if (data.orphan_count > 500) {

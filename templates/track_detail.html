@@ -22,7 +22,7 @@
                     {% for key, value in track.items() %}
                     {% if key != 'composite_url' %}
                     <tr>
-                        <th style="width: 220px;">{{ key }}</th>
+                        <th class="detail-key">{{ key }}</th>
                         <td>
                             {% if value is mapping or value is sequence and value is not string %}
                             <pre class="json-cell">{{ value | tojson(indent=2) }}</pre>

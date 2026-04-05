@@ -94,7 +94,7 @@
                     <td>{{ bundle.last_modified_display }}</td>
                     <td>
                         {% if not web_read_only %}
-                        <form method="post" action="{{ url_for('delete_model', model_id=bundle.bundle_name) }}" onsubmit="return confirm('Delete bundle {{ bundle.bundle_name }} and all files in S3?');">
+                        <form method="post" action="{{ url_for('delete_model', model_id=bundle.bundle_name) }}" class="js-confirm-delete" data-confirm="Delete bundle {{ bundle.bundle_name }} and all files in S3?">
                             <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
                         </form>
                         {% else %}
@@ -125,4 +125,15 @@
     </div>
 </div>
 {% endif %}
+
+{% block scripts %}
+<script>
+document.addEventListener('submit', function(e) {
+    var form = e.target.closest('.js-confirm-delete');
+    if (form && !confirm(form.getAttribute('data-confirm'))) {
+        e.preventDefault();
+    }
+});
+</script>
+{% endblock %}
 {% endblock %}
