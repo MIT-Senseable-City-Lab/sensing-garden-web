@@ -2014,7 +2014,6 @@ def admin_s3_presign() -> Any:
 
 
 @app.route("/api/admin/orphaned-devices")
-@require_login
 def api_admin_orphaned_devices() -> Any:
     try:
         result = api._request("GET", "admin/orphaned-devices")
