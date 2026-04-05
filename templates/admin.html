@@ -15,6 +15,9 @@
     <li class="nav-item">
         <a class="nav-link" id="orphans-tab" data-toggle="tab" href="#orphans-pane" role="tab">S3 Orphans</a>
     </li>
+    <li class="nav-item">
+        <a class="nav-link" id="orphans-devices-tab" data-toggle="tab" href="#orphans-devices-pane" role="tab">Orphaned Devices</a>
+    </li>
 </ul>
 
 <div class="tab-content pt-3" id="adminTabContent">
@@ -53,6 +56,14 @@
         <button id="run-orphan-check" class="btn btn-sm btn-primary mb-3">Run Orphan Check</button>
         <span id="orphan-status" class="ml-3 text-muted small"></span>
         <div id="orphan-results"></div>
+    </div>
+
+    <!-- Tab 4: Orphaned Devices -->
+    <div class="tab-pane fade" id="orphans-devices-pane" role="tabpanel">
+        <p class="text-muted mb-3">Device IDs found in data tables but not registered in the devices table.</p>
+        <button id="run-orphan-devices" class="btn btn-sm btn-primary mb-3">Check Orphaned Devices</button>
+        <span id="orphan-devices-status" class="ml-3 text-muted small"></span>
+        <div id="orphan-devices-results"></div>
     </div>
 </div>
 {% endblock %}
@@ -221,6 +232,34 @@ document.getElementById('load-counts-btn').addEventListener('click', function() 
 
         document.getElementById('counts-canvas').parentElement.classList.add('chart-container');
         countsChart.resize();
+    }, btn);
+});
+
+// ---- Orphaned Devices Check ----
+document.getElementById('run-orphan-devices').addEventListener('click', function() {
+    var btn = this;
+    var statusEl = document.getElementById('orphan-devices-status');
+    var container = document.getElementById('orphan-devices-results');
+
+    fetchJSON('/api/admin/orphaned-devices', container, statusEl, function(data) {
+        if (data.error) {
+            container.innerHTML = '<div class="alert alert-danger">Error: ' + data.error + '</div>';
+            statusEl.textContent = 'Error';
+            return;
+        }
+        if (!data.orphaned_devices || data.orphaned_devices.length === 0) {
+            container.innerHTML = '<div class="alert alert-success">No orphaned devices found. All device IDs in data tables are registered.</div>';
+            statusEl.textContent = 'Clean';
+            return;
+        }
+        var html = '<div class="alert alert-warning">' + data.count + ' orphaned device ID(s) found across data tables.</div>';
+        html += '<table class="table table-sm table-hover table-admin"><thead><tr><th>Device ID</th><th>Found In</th></tr></thead><tbody>';
+        data.orphaned_devices.forEach(function(d) {
+            html += '<tr><td><code>' + d.device_id + '</code></td><td>' + d.found_in.join(', ') + '</td></tr>';
+        });
+        html += '</tbody></table>';
+        container.innerHTML = html;
+        statusEl.textContent = data.count + ' orphaned device(s)';
     }, btn);
 });
 

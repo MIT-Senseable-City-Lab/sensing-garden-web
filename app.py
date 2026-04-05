@@ -2013,6 +2013,83 @@ def admin_s3_presign() -> Any:
         return jsonify({"error": str(exc)}), 500
 
 
+@app.route("/api/admin/orphaned-devices")
+def admin_orphaned_devices() -> Any:
+    try:
+        known_devices: set[str] = set()
+        next_token: Optional[str] = None
+        while True:
+            response = api.fetch_devices(limit=FETCH_ALL_PAGE_LIMIT, next_token=next_token)
+            for item in response.get("items", []):
+                did = item.get("device_id", "")
+                if did:
+                    known_devices.add(did)
+            next_token = response.get("next_token")
+            if not next_token:
+                break
+
+        orphaned: dict[str, list[str]] = {}
+
+        # Paginate classifications
+        try:
+            next_token = None
+            while True:
+                response = api.fetch_classifications(limit=FETCH_ALL_PAGE_LIMIT, next_token=next_token)
+                for item in response.get("items", []):
+                    did = item.get("device_id", "")
+                    if did and did not in known_devices:
+                        if did not in orphaned:
+                            orphaned[did] = []
+                        if "classifications" not in orphaned[did]:
+                            orphaned[did].append("classifications")
+                next_token = response.get("next_token")
+                if not next_token:
+                    break
+        except Exception:
+            pass
+
+        # Paginate videos
+        try:
+            next_token = None
+            while True:
+                response = api.fetch_videos(limit=FETCH_ALL_PAGE_LIMIT, next_token=next_token)
+                for item in response.get("items", []):
+                    did = item.get("device_id", "")
+                    if did and did not in known_devices:
+                        if did not in orphaned:
+                            orphaned[did] = []
+                        if "videos" not in orphaned[did]:
+                            orphaned[did].append("videos")
+                next_token = response.get("next_token")
+                if not next_token:
+                    break
+        except Exception:
+            pass
+
+        # Heartbeats (no pagination support)
+        try:
+            for item in api.fetch_heartbeats().get("items", []):
+                did = item.get("device_id", "")
+                if did and did not in known_devices:
+                    if did not in orphaned:
+                        orphaned[did] = []
+                    if "heartbeats" not in orphaned[did]:
+                        orphaned[did].append("heartbeats")
+        except Exception:
+            pass
+
+        return jsonify({
+            "orphaned_devices": [
+                {"device_id": did, "found_in": tables}
+                for did, tables in sorted(orphaned.items())
+            ],
+            "count": len(orphaned),
+            "known_device_count": len(known_devices),
+        })
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
     app.run(debug=False, host="0.0.0.0", port=port)
