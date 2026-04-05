@@ -282,6 +282,8 @@
     {% block head %}{% endblock %}
 </head>
 <body>
+    {% set show_nav = show_nav|default(True) %}
+    {% if show_nav %}
     <nav class="navbar navbar-expand-lg navbar-light">
         <div class="container-fluid">
             <a class="navbar-brand" href="{{ url_for('index') }}">Sensing Garden Admin</a>
@@ -309,6 +311,7 @@
             </div>
         </div>
     </nav>
+    {% endif %}
 
     <main class="container-fluid">
         {% block content %}{% endblock %}

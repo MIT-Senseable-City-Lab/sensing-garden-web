@@ -1,4 +1,5 @@
 import csv
+import hmac
 import hashlib
 import io
 import json
@@ -12,16 +13,19 @@ from urllib.parse import urlparse
 import boto3
 import requests
 from dotenv import load_dotenv
-from flask import Flask, Response, jsonify, make_response, redirect, render_template, request, url_for
+from flask import Flask, Response, jsonify, make_response, redirect, render_template, request, session, url_for
 
 
 load_dotenv()
 
 app = Flask(__name__)
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "sensing-garden-dashboard-dev")
+app.config["SESSION_COOKIE_NAME"] = "sg_auth"
+app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=30)
 
 API_BASE_URL = os.getenv("API_BASE_URL", "https://api.sensinggarden.com/v1")
 API_KEY = os.getenv("SENSING_GARDEN_API_KEY", "")
+DASHBOARD_PASSWORD = os.getenv("DASHBOARD_PASSWORD", "")
 MODELS_BUCKET = os.getenv("MODELS_BUCKET", "scl-sensing-garden-models")
 VIDEOS_BUCKET = os.getenv("VIDEOS_BUCKET", "scl-sensing-garden-videos")
 IMAGES_BUCKET = os.getenv("IMAGES_BUCKET", "scl-sensing-garden-images")
@@ -288,6 +292,33 @@ class ApiClient:
 
 
 api = ApiClient(API_BASE_URL, API_KEY)
+
+
+def _dashboard_auth_enabled() -> bool:
+    return bool(DASHBOARD_PASSWORD)
+
+
+def _dashboard_auth_token() -> str:
+    return hashlib.sha256(DASHBOARD_PASSWORD.encode("utf-8")).hexdigest()
+
+
+def _dashboard_is_authenticated() -> bool:
+    if not _dashboard_auth_enabled():
+        return True
+    token = session.get("dashboard_auth")
+    return isinstance(token, str) and hmac.compare_digest(token, _dashboard_auth_token())
+
+
+@app.before_request
+def require_dashboard_password() -> Optional[Response]:
+    if not _dashboard_auth_enabled():
+        return None
+    if request.endpoint in {"login", "health_check", "static"}:
+        return None
+    if _dashboard_is_authenticated():
+        return None
+    next_url = request.full_path if request.query_string else request.path
+    return redirect(url_for("login", next=next_url))
 
 
 TRACK_COLUMNS = [
@@ -1067,6 +1098,24 @@ def _local_csv_rows(table_name: str) -> List[Dict[str, Any]]:
         rows = _fetch_all_paginated(api.fetch_environment, device_id=device_id, sort_by=sort_by, sort_desc=sort_desc)
         return [_normalize_environment_row(item) for item in rows]
     raise ValueError(f"Unsupported table for CSV export: {table_name}")
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login() -> Any:
+    if not _dashboard_auth_enabled():
+        return redirect(url_for("index"))
+    if _dashboard_is_authenticated():
+        return redirect(request.args.get("next") or url_for("index"))
+    error: Optional[str] = None
+    next_url = request.args.get("next") or request.form.get("next") or url_for("index")
+    if request.method == "POST":
+        submitted_password = request.form.get("password", "")
+        if hmac.compare_digest(submitted_password, DASHBOARD_PASSWORD):
+            session.permanent = True
+            session["dashboard_auth"] = _dashboard_auth_token()
+            return redirect(next_url)
+        error = "Wrong password"
+    return render_template("login.html", error=error, next_url=next_url, show_nav=False)
 
 
 @app.route("/health")
