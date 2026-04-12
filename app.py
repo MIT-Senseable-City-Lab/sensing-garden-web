@@ -7,7 +7,7 @@ import os
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, FrozenSet, List, Optional, Union
 from urllib.parse import urlparse
 
 import boto3
@@ -51,6 +51,16 @@ MAX_PAGE_LIMIT = 200
 FETCH_ALL_PAGE_LIMIT = 500
 WEB_READ_ONLY = os.getenv("WEB_READ_ONLY", "true").lower() in {"1", "true", "yes", "on"}
 EXPORTABLE_API_TABLES = {"classifications", "devices", "videos", "environment"}
+S3_IMAGE_EXTENSIONS: FrozenSet[str] = frozenset({
+    ".bmp",
+    ".gif",
+    ".jpeg",
+    ".jpg",
+    ".png",
+    ".tif",
+    ".tiff",
+    ".webp",
+})
 
 
 @dataclass(frozen=True)
@@ -657,11 +667,17 @@ def _validate_s3_key(value: str) -> str:
     return key
 
 
+def is_s3_image_key(key: str) -> bool:
+    return any(key.lower().endswith(extension) for extension in S3_IMAGE_EXTENSIONS)
+
+
 def _s3_file_row(item: Dict[str, Any]) -> Dict[str, Any]:
     modified = _s3_object_timestamp(item.get("LastModified"))
+    key = str(item["Key"])
     return {
-        "key": str(item["Key"]),
-        "name": str(item["Key"]).rstrip("/").rsplit("/", 1)[-1],
+        "key": key,
+        "name": key.rstrip("/").rsplit("/", 1)[-1],
+        "is_image": is_s3_image_key(key),
         "size_bytes": int(item.get("Size", 0)),
         "size_display": _format_bytes(item.get("Size", 0)),
         "last_modified_time": modified,

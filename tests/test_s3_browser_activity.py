@@ -30,6 +30,11 @@ class FakeS3:
             "CommonPrefixes": [{"Prefix": "v1/device-1/logs/"}],
             "Contents": [
                 {
+                    "Key": "v1/device-1/frame.jpg",
+                    "Size": 1200,
+                    "LastModified": datetime(2026, 4, 12, tzinfo=timezone.utc),
+                },
+                {
                     "Key": "v1/device-1/results.json",
                     "Size": 42,
                     "LastModified": datetime(2026, 4, 12, tzinfo=timezone.utc),
@@ -51,7 +56,10 @@ def test_s3_browser_lists_output_bucket(monkeypatch):
 
     assert response.status_code == 200
     assert b"logs/" in response.data
+    assert b"frame.jpg" in response.data
     assert b"results.json" in response.data
+    assert b'data-key="v1/device-1/frame.jpg" data-title="frame.jpg">View' in response.data
+    assert b'data-key="v1/device-1/results.json" data-title="results.json">View' not in response.data
 
 
 def test_s3_open_is_read_only_and_audited(monkeypatch):
