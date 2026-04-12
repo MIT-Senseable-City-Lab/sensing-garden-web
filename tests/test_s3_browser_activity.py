@@ -108,5 +108,8 @@ def test_admin_logs_page_includes_live_polling_controls():
     assert response.status_code == 200
     assert b'id="live-logs"' in response.data
     assert b"var LIVE_POLL_MS = 2000;" in response.data
+    assert b"var ERROR_LEVELS = ['ERROR', 'CRITICAL', 'FATAL'];" in response.data
+    assert b"Number(item.status_code) >= 400" in response.data
+    assert b'class=\"table-danger\"' in response.data
     assert b"setLiveEnabled(e.target.checked)" in response.data
     assert b"/api/admin/activity?" in response.data

@@ -69,6 +69,7 @@
 {% block scripts %}
 <script>
 var LIVE_POLL_MS = 2000;
+var ERROR_LEVELS = ['ERROR', 'CRITICAL', 'FATAL'];
 var liveTimer = null;
 var loadingActivity = false;
 
@@ -82,13 +83,29 @@ function cell(value) {
     return escapeHtml(value);
 }
 
+function hasErrorStatus(item) {
+    return Number(item.status_code) >= 400;
+}
+
+function hasErrorLevel(item) {
+    return ERROR_LEVELS.indexOf(String(item.level || '').toUpperCase()) !== -1;
+}
+
+function isErrorActivity(item) {
+    return hasErrorStatus(item) || hasErrorLevel(item);
+}
+
+function rowClass(item) {
+    return isErrorActivity(item) ? ' class="table-danger"' : '';
+}
+
 function renderRows(items) {
     if (!items.length) {
         return '<tr><td colspan="6" class="text-muted">No activity found.</td></tr>';
     }
     return items.map(function(item) {
         var keyOrPath = item.s3_key || item.path || '';
-        return '<tr>' +
+        return '<tr' + rowClass(item) + '>' +
             '<td>' + cell(item.timestamp_display) + '</td>' +
             '<td><code>' + cell(item.source) + '</code></td>' +
             '<td>' + cell(item.device_id) + '</td>' +
