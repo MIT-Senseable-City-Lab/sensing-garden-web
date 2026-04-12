@@ -38,6 +38,10 @@
     </div>
     <button type="submit" class="btn btn-sm btn-primary">Apply Filters</button>
     <a href="{{ url_for('admin_logs') }}" class="btn btn-sm btn-outline-secondary">Reset</a>
+    <div class="custom-control custom-switch d-inline-block ml-3">
+        <input type="checkbox" class="custom-control-input" id="live-logs">
+        <label class="custom-control-label" for="live-logs">Live</label>
+    </div>
     <span id="activity-status" class="ml-3 text-muted small"></span>
 </form>
 
@@ -64,8 +68,18 @@
 
 {% block scripts %}
 <script>
+var LIVE_POLL_MS = 2000;
+var liveTimer = null;
+var loadingActivity = false;
+
+function escapeHtml(value) {
+    var node = document.createElement('span');
+    node.textContent = value == null ? '' : String(value);
+    return node.innerHTML;
+}
+
 function cell(value) {
-    return value ? value : '';
+    return escapeHtml(value);
 }
 
 function renderRows(items) {
@@ -85,17 +99,68 @@ function renderRows(items) {
     }).join('');
 }
 
-function loadActivity() {
+function activityParams() {
     var form = document.getElementById('activity-filter');
-    var status = document.getElementById('activity-status');
+    return new URLSearchParams(new FormData(form));
+}
+
+function setStatus(message) {
+    document.getElementById('activity-status').textContent = message;
+}
+
+function scheduleLivePoll() {
+    if (!document.getElementById('live-logs').checked) {
+        return;
+    }
+    clearLivePoll();
+    liveTimer = window.setTimeout(function() {
+        liveTimer = null;
+        loadActivity();
+    }, LIVE_POLL_MS);
+}
+
+function clearLivePoll() {
+    if (liveTimer) {
+        window.clearTimeout(liveTimer);
+        liveTimer = null;
+    }
+}
+
+function setLiveEnabled(enabled) {
+    clearLivePoll();
+    setStatus(enabled ? 'Live: on' : 'Live: off');
+    if (enabled) {
+        loadActivity();
+    }
+}
+
+function loadActivity() {
+    if (loadingActivity) {
+        scheduleLivePoll();
+        return;
+    }
+    clearLivePoll();
+    loadingActivity = true;
     var rows = document.getElementById('activity-rows');
-    var params = new URLSearchParams(new FormData(form));
-    status.textContent = 'Loading...';
-    fetch('/api/admin/activity?' + params.toString())
-        .then(function(response) { return response.json(); })
+    setStatus('Loading...');
+    fetch('/api/admin/activity?' + activityParams().toString())
+        .then(function(response) {
+            if (!response.ok) {
+                throw new Error('activity request failed');
+            }
+            return response.json();
+        })
         .then(function(data) {
             rows.innerHTML = renderRows(data.items || []);
-            status.textContent = (data.count || 0) + ' event(s)';
+            var updated = new Date().toLocaleTimeString();
+            setStatus((data.count || 0) + ' event(s) - Last updated ' + updated);
+        })
+        .catch(function() {
+            setStatus('Error loading logs');
+        })
+        .finally(function() {
+            loadingActivity = false;
+            scheduleLivePoll();
         });
 }
 
@@ -103,6 +168,12 @@ document.getElementById('activity-filter').addEventListener('submit', function(e
     e.preventDefault();
     loadActivity();
 });
+
+document.getElementById('live-logs').addEventListener('change', function(e) {
+    setLiveEnabled(e.target.checked);
+});
+
+window.addEventListener('beforeunload', clearLivePoll);
 
 loadActivity();
 </script>

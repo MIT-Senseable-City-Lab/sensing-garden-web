@@ -99,3 +99,14 @@ def test_activity_api_returns_merged_rows(monkeypatch):
 
     assert response.status_code == 200
     assert response.get_json()["items"][0]["message"] == "opened"
+
+
+def test_admin_logs_page_includes_live_polling_controls():
+    with app.test_client() as client:
+        response = client.get("/admin/logs")
+
+    assert response.status_code == 200
+    assert b'id="live-logs"' in response.data
+    assert b"var LIVE_POLL_MS = 2000;" in response.data
+    assert b"setLiveEnabled(e.target.checked)" in response.data
+    assert b"/api/admin/activity?" in response.data
