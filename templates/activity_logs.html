@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+
+{% block title %}Logs - Sensing Garden Admin{% endblock %}
+
+{% block content %}
+<section class="page-header">
+    <h2>Logs</h2>
+    <p class="page-subtitle">Rolling activity from the dashboard, backend, S3, and bugcam.</p>
+</section>
+
+<form id="activity-filter" class="filter-panel">
+    <div class="form-row">
+        <div class="form-group col-md-2">
+            <label for="source">Source</label>
+            <select class="form-control form-control-sm" id="source" name="source">
+                <option value="">All</option>
+                {% for option in sources %}
+                <option value="{{ option }}" {% if source == option %}selected{% endif %}>{{ option }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="form-group col-md-3">
+            <label for="device_id">Device ID</label>
+            <input type="text" class="form-control form-control-sm" id="device_id" name="device_id" value="{{ device_id }}">
+        </div>
+        <div class="form-group col-md-4">
+            <label for="q">Search</label>
+            <input type="text" class="form-control form-control-sm" id="q" name="q" value="{{ query }}">
+        </div>
+        <div class="form-group col-md-2">
+            <label for="limit">Rows</label>
+            <select class="form-control form-control-sm" id="limit" name="limit">
+                {% for option in ["25", "50", "100", "200"] %}
+                <option value="{{ option }}" {% if limit|string == option %}selected{% endif %}>{{ option }}</option>
+                {% endfor %}
+            </select>
+        </div>
+    </div>
+    <button type="submit" class="btn btn-sm btn-primary">Apply Filters</button>
+    <a href="{{ url_for('admin_logs') }}" class="btn btn-sm btn-outline-secondary">Reset</a>
+    <span id="activity-status" class="ml-3 text-muted small"></span>
+</form>
+
+<div class="table-wrap">
+    <div class="table-responsive">
+        <table class="table table-sm table-hover table-admin">
+            <thead>
+                <tr>
+                    <th>Time</th>
+                    <th>Source</th>
+                    <th>Device</th>
+                    <th>Event</th>
+                    <th>Message</th>
+                    <th>S3 Key / Path</th>
+                </tr>
+            </thead>
+            <tbody id="activity-rows">
+                <tr><td colspan="6" class="text-muted">Loading...</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function cell(value) {
+    return value ? value : '';
+}
+
+function renderRows(items) {
+    if (!items.length) {
+        return '<tr><td colspan="6" class="text-muted">No activity found.</td></tr>';
+    }
+    return items.map(function(item) {
+        var keyOrPath = item.s3_key || item.path || '';
+        return '<tr>' +
+            '<td>' + cell(item.timestamp_display) + '</td>' +
+            '<td><code>' + cell(item.source) + '</code></td>' +
+            '<td>' + cell(item.device_id) + '</td>' +
+            '<td>' + cell(item.event_type) + '</td>' +
+            '<td>' + cell(item.message) + '</td>' +
+            '<td><code>' + cell(keyOrPath) + '</code></td>' +
+            '</tr>';
+    }).join('');
+}
+
+function loadActivity() {
+    var form = document.getElementById('activity-filter');
+    var status = document.getElementById('activity-status');
+    var rows = document.getElementById('activity-rows');
+    var params = new URLSearchParams(new FormData(form));
+    status.textContent = 'Loading...';
+    fetch('/api/admin/activity?' + params.toString())
+        .then(function(response) { return response.json(); })
+        .then(function(data) {
+            rows.innerHTML = renderRows(data.items || []);
+            status.textContent = (data.count || 0) + ' event(s)';
+        });
+}
+
+document.getElementById('activity-filter').addEventListener('submit', function(e) {
+    e.preventDefault();
+    loadActivity();
+});
+
+loadActivity();
+</script>
+{% endblock %}

@@ -7,13 +7,25 @@ import os
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Union
 from urllib.parse import urlparse
 
 import boto3
 import requests
 from dotenv import load_dotenv
 from flask import Flask, Response, jsonify, make_response, redirect, render_template, request, session, url_for
+
+from activity import (
+    ActivityEvent,
+    ActivityEventType,
+    ActivitySource,
+    bugcam_log_events,
+    event_message,
+    list_activity_events,
+    record_activity_event,
+    s3_object_event,
+    utc_now,
+)
 
 
 load_dotenv()
@@ -30,6 +42,7 @@ MODELS_BUCKET = os.getenv("MODELS_BUCKET", "scl-sensing-garden-models")
 VIDEOS_BUCKET = os.getenv("VIDEOS_BUCKET", "scl-sensing-garden-videos")
 IMAGES_BUCKET = os.getenv("IMAGES_BUCKET", "scl-sensing-garden-images")
 OUTPUT_BUCKET = os.getenv("OUTPUT_BUCKET", "scl-sensing-garden")
+ACTIVITY_EVENTS_TABLE = os.getenv("ACTIVITY_EVENTS_TABLE", "sensing-garden-activity-events")
 MODEL_FILENAME = "model.hef"
 LABELS_FILENAME = "labels.txt"
 HEARTBEAT_ONLINE_THRESHOLD = timedelta(hours=2)
@@ -72,14 +85,20 @@ class ApiClient:
         params: Optional[Dict[str, Any]] = None,
         body: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        response = requests.request(
-            method,
-            f"{self.base_url}/{endpoint.lstrip('/')}",
-            params=params,
-            json=body,
-            headers={**self._headers(), "Content-Type": "application/json"},
-            timeout=30,
-        )
+        path = endpoint.lstrip("/")
+        try:
+            response = requests.request(
+                method,
+                f"{self.base_url}/{path}",
+                params=params,
+                json=body,
+                headers={**self._headers(), "Content-Type": "application/json"},
+                timeout=30,
+            )
+        except requests.RequestException:
+            record_dashboard_api_request(method, path, 0)
+            raise
+        record_dashboard_api_request(method, path, response.status_code)
         response.raise_for_status()
         if not response.content:
             return {}
@@ -427,7 +446,7 @@ def inject_web_mode() -> Dict[str, Any]:
     return {"web_read_only": WEB_READ_ONLY}
 
 
-def get_models_s3_client() -> Any:
+def _aws_client_kwargs() -> Dict[str, str]:
     client_kwargs: Dict[str, str] = {}
     if os.getenv("AWS_ACCESS_KEY_ID"):
         client_kwargs["aws_access_key_id"] = os.getenv("AWS_ACCESS_KEY_ID", "")
@@ -437,7 +456,37 @@ def get_models_s3_client() -> Any:
         client_kwargs["aws_session_token"] = os.getenv("AWS_SESSION_TOKEN", "")
     if os.getenv("AWS_REGION"):
         client_kwargs["region_name"] = os.getenv("AWS_REGION", "")
-    return boto3.client("s3", **client_kwargs)
+    return client_kwargs
+
+
+def get_s3_client() -> Any:
+    return boto3.client("s3", **_aws_client_kwargs())
+
+
+def get_dynamodb_resource() -> Any:
+    return boto3.resource("dynamodb", **_aws_client_kwargs())
+
+
+def get_activity_table() -> Any:
+    return get_dynamodb_resource().Table(ACTIVITY_EVENTS_TABLE)
+
+
+def get_models_s3_client() -> Any:
+    return get_s3_client()
+
+
+def record_dashboard_api_request(method: str, path: str, status_code: int) -> None:
+    event = ActivityEvent(
+        timestamp=utc_now(),
+        source=ActivitySource.DASHBOARD,
+        event_type=ActivityEventType.API_REQUEST,
+        actor_type="dashboard",
+        method=method,
+        path=f"/{path}",
+        status_code=status_code,
+        message=event_message(method, f"/{path}", status_code),
+    )
+    record_activity_event(get_activity_table(), event)
 
 
 def _bundle_key(model_id: str, filename: str) -> str:
@@ -592,6 +641,127 @@ def delete_model_bundle(model_id: str) -> int:
         return 0
     s3_client.delete_objects(Bucket=MODELS_BUCKET, Delete={"Objects": objects, "Quiet": True})
     return len(objects)
+
+
+def _validate_s3_path(value: str) -> str:
+    normalized = value.strip()
+    if normalized.startswith("/") or ".." in normalized:
+        raise ValueError("Invalid S3 path")
+    return normalized
+
+
+def _validate_s3_key(value: str) -> str:
+    key = _validate_s3_path(value)
+    if not key or key.endswith("/"):
+        raise ValueError("S3 key is required")
+    return key
+
+
+def _s3_file_row(item: Dict[str, Any]) -> Dict[str, Any]:
+    modified = _s3_object_timestamp(item.get("LastModified"))
+    return {
+        "key": str(item["Key"]),
+        "name": str(item["Key"]).rstrip("/").rsplit("/", 1)[-1],
+        "size_bytes": int(item.get("Size", 0)),
+        "size_display": _format_bytes(item.get("Size", 0)),
+        "last_modified_time": modified,
+        "last_modified_display": _format_timestamp(modified),
+    }
+
+
+def _s3_folder_row(prefix: str) -> Dict[str, str]:
+    return {
+        "prefix": prefix,
+        "name": prefix.rstrip("/").rsplit("/", 1)[-1] + "/",
+    }
+
+
+def _s3_parent_prefix(prefix: str) -> str:
+    parts = [part for part in prefix.strip("/").split("/") if part]
+    return "/".join(parts[:-1]) + "/" if len(parts) > 1 else ""
+
+
+def _s3_breadcrumbs(prefix: str) -> List[Dict[str, str]]:
+    parts = [part for part in prefix.strip("/").split("/") if part]
+    crumbs = [{"label": OUTPUT_BUCKET, "prefix": ""}]
+    for index, part in enumerate(parts):
+        crumbs.append({"label": part, "prefix": "/".join(parts[: index + 1]) + "/"})
+    return crumbs
+
+
+def list_output_s3(prefix: str, continuation_token: Optional[str], limit: int) -> Dict[str, Any]:
+    params: Dict[str, Any] = {"Bucket": OUTPUT_BUCKET, "Prefix": prefix, "Delimiter": "/", "MaxKeys": limit}
+    if continuation_token:
+        params["ContinuationToken"] = continuation_token
+    response = get_s3_client().list_objects_v2(**params)
+    folders = [_s3_folder_row(item["Prefix"]) for item in response.get("CommonPrefixes", [])]
+    files = [_s3_file_row(item) for item in response.get("Contents", []) if item["Key"] != prefix]
+    return {"folders": folders, "files": files, "next_token": response.get("NextContinuationToken")}
+
+
+def record_s3_activity(event_type: ActivityEventType, key: str, message: str) -> None:
+    event = ActivityEvent(
+        timestamp=utc_now(),
+        source=ActivitySource.DASHBOARD,
+        event_type=event_type,
+        actor_type="dashboard",
+        s3_bucket=OUTPUT_BUCKET,
+        s3_key=key or None,
+        message=message,
+    )
+    record_activity_event(get_activity_table(), event)
+
+
+def _recent_s3_object_events(limit: int) -> List[ActivityEvent]:
+    paginator = get_s3_client().get_paginator("list_objects_v2")
+    objects: List[Dict[str, Any]] = []
+    for page in paginator.paginate(Bucket=OUTPUT_BUCKET, Prefix="v1/", PaginationConfig={"PageSize": 500}):
+        objects.extend(page.get("Contents", []))
+    recent = sorted(objects, key=lambda item: item["LastModified"], reverse=True)[:limit]
+    return [s3_object_event(OUTPUT_BUCKET, item) for item in recent]
+
+
+def _recent_log_objects(limit: int) -> List[Dict[str, Any]]:
+    objects = [event for event in _recent_s3_object_events(500) if event.s3_key and "/logs/" in event.s3_key]
+    rows = [{"Key": event.s3_key, "LastModified": event.timestamp} for event in objects]
+    return rows[:limit]
+
+
+def _read_s3_text(key: str) -> str:
+    response = get_s3_client().get_object(Bucket=OUTPUT_BUCKET, Key=key)
+    return response["Body"].read().decode("utf-8")
+
+
+def _recent_bugcam_events(limit: int) -> List[ActivityEvent]:
+    events: List[ActivityEvent] = []
+    for item in _recent_log_objects(5):
+        key = str(item["Key"])
+        events.extend(bugcam_log_events(OUTPUT_BUCKET, key, _read_s3_text(key), item["LastModified"]))
+    return sorted(events, key=lambda event: event.timestamp, reverse=True)[:limit]
+
+
+def _activity_row(event: Union[Dict[str, Any], ActivityEvent]) -> Dict[str, Any]:
+    data = event.model_dump(mode="json", exclude_none=True) if isinstance(event, ActivityEvent) else dict(event)
+    data["timestamp_display"] = _format_timestamp(data["timestamp"])
+    return data
+
+
+def _filter_activity_rows(rows: List[Dict[str, Any]], source: str, device_id: str, query: str) -> List[Dict[str, Any]]:
+    query_lower = query.lower()
+    return [
+        row
+        for row in rows
+        if (not source or row.get("source") == source)
+        and (not device_id or row.get("device_id") == device_id)
+        and (not query or query_lower in f"{row.get('message', '')} {row.get('s3_key', '')} {row.get('path', '')}".lower())
+    ]
+
+
+def merged_activity_rows(source: str, device_id: str, query: str, limit: int) -> List[Dict[str, Any]]:
+    stored = list_activity_events(get_activity_table(), source, device_id, query, limit)
+    live = [_activity_row(event) for event in _recent_s3_object_events(limit) + _recent_bugcam_events(limit)]
+    rows = [_activity_row(item) for item in stored] + _filter_activity_rows(live, source, device_id, query)
+    return sorted(rows, key=lambda row: row["timestamp"], reverse=True)[:limit]
 
 
 def _parse_timestamp(value: Any) -> Optional[datetime]:
@@ -1182,6 +1352,7 @@ def health_check() -> tuple[Response, int]:
         jsonify(
             {
                 "status": "healthy",
+                "message": "Dashboard is healthy",
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "environment": {
                     "API_BASE_URL": API_BASE_URL,
@@ -1880,6 +2051,78 @@ def delete_model(model_id: str) -> Any:
         return render_template("error.html", error=str(exc)), 500
 
 
+@app.route("/s3")
+def view_s3_browser() -> str:
+    try:
+        prefix = _validate_s3_path(request.args.get("prefix", ""))
+        limit = _get_limit()
+        listing = list_output_s3(prefix, request.args.get("continuation_token"), limit)
+        record_s3_activity(ActivityEventType.S3_LIST, prefix, f"Listed s3://{OUTPUT_BUCKET}/{prefix}")
+        return render_template(
+            "s3_browser.html",
+            bucket=OUTPUT_BUCKET,
+            prefix=prefix,
+            parent_prefix=_s3_parent_prefix(prefix),
+            breadcrumbs=_s3_breadcrumbs(prefix),
+            folders=listing["folders"],
+            files=listing["files"],
+            next_token=listing["next_token"],
+            limit=limit,
+        )
+    except Exception as exc:
+        return render_template("error.html", error=str(exc)), 500
+
+
+@app.route("/api/s3/list")
+def api_s3_list() -> Response:
+    try:
+        prefix = _validate_s3_path(request.args.get("prefix", ""))
+        limit = _get_limit()
+        listing = list_output_s3(prefix, request.args.get("continuation_token"), limit)
+        record_s3_activity(ActivityEventType.S3_LIST, prefix, f"Listed s3://{OUTPUT_BUCKET}/{prefix}")
+        return jsonify(listing)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+
+@app.route("/api/s3/open")
+def api_s3_open() -> Response:
+    try:
+        key = _validate_s3_key(request.args.get("key", ""))
+        url = get_s3_client().generate_presigned_url(
+            "get_object",
+            Params={"Bucket": OUTPUT_BUCKET, "Key": key},
+            ExpiresIn=3600,
+        )
+        record_s3_activity(ActivityEventType.S3_OPEN, key, f"Opened s3://{OUTPUT_BUCKET}/{key}")
+        return jsonify({"url": url})
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+
+@app.route("/admin/logs")
+def admin_logs() -> str:
+    return render_template(
+        "activity_logs.html",
+        sources=[source.value for source in ActivitySource],
+        source=request.args.get("source", ""),
+        device_id=request.args.get("device_id", ""),
+        query=request.args.get("q", ""),
+        limit=_get_limit(100),
+    )
+
+
+@app.route("/api/admin/activity")
+def api_admin_activity() -> Response:
+    rows = merged_activity_rows(
+        request.args.get("source", ""),
+        request.args.get("device_id", ""),
+        request.args.get("q", ""),
+        _get_limit(100),
+    )
+    return jsonify({"items": rows, "count": len(rows)})
+
+
 @app.route("/admin")
 def admin() -> str:
     return render_template("admin.html", device_ids=_device_ids())
@@ -1939,18 +2182,8 @@ def admin_video_counts() -> Response:
 @app.route("/api/admin/s3-orphans")
 def admin_s3_orphans() -> Any:
     try:
-        s3 = boto3.client(
-            "s3",
-            aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
-            aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
-            region_name=os.getenv("AWS_REGION", "us-east-1"),
-        )
-        dynamodb = boto3.resource(
-            "dynamodb",
-            aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
-            aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
-            region_name=os.getenv("AWS_REGION", "us-east-1"),
-        )
+        s3 = get_s3_client()
+        dynamodb = get_dynamodb_resource()
         table = dynamodb.Table("sensing-garden-videos")
         s3_files: List[Dict[str, Any]] = []
         paginator = s3.get_paginator("list_objects_v2")
@@ -1978,6 +2211,7 @@ def admin_s3_orphans() -> Any:
             scan_kwargs["ExclusiveStartKey"] = response["LastEvaluatedKey"]
 
         orphans = [item for item in s3_files if item["key"] not in db_keys]
+        record_s3_activity(ActivityEventType.S3_LIST, "videos/", "Checked video S3 orphans")
         return jsonify(
             {
                 "total_s3_files": len(s3_files),
@@ -1997,17 +2231,12 @@ def admin_s3_presign() -> Any:
     if not key.startswith("videos/") or not key.endswith(".mp4"):
         return jsonify({"error": "Invalid key"}), 400
     try:
-        s3 = boto3.client(
-            "s3",
-            aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
-            aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
-            region_name=os.getenv("AWS_REGION", "us-east-1"),
-        )
-        url = s3.generate_presigned_url(
+        url = get_s3_client().generate_presigned_url(
             "get_object",
             Params={"Bucket": VIDEOS_BUCKET, "Key": key},
             ExpiresIn=3600,
         )
+        record_s3_activity(ActivityEventType.S3_OPEN, key, f"Opened s3://{VIDEOS_BUCKET}/{key}")
         return jsonify({"url": url})
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500

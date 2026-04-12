@@ -16,6 +16,8 @@ AWS_ACCESS_KEY_ID=your_aws_access_key_id
 AWS_SECRET_ACCESS_KEY=your_aws_secret_access_key
 AWS_REGION=us-east-1
 MODELS_BUCKET=scl-sensing-garden-models
+OUTPUT_BUCKET=scl-sensing-garden
+ACTIVITY_EVENTS_TABLE=sensing-garden-activity-events
 ```
 
 ### Option 1: Using Poetry (Local Development)
@@ -65,6 +67,8 @@ http://localhost:8080
 - View detection data including images and metadata
 - View classification data including species information and confidence scores
 - View model information
+- Browse the output S3 bucket in read-only mode
+- View dashboard, backend, S3, and bugcam activity in one Admin log
 - Upload model bundles to the models S3 bucket
 - Delete model bundles from S3 and remove model records
 - View detailed information for each item
@@ -88,6 +92,8 @@ The following environment variables are required (stored in the `.env` file):
 - `AWS_SECRET_ACCESS_KEY`: AWS secret access key for model bundle management
 - `AWS_REGION`: AWS region for S3 access
 - `MODELS_BUCKET`: S3 bucket used for model bundles
+- `OUTPUT_BUCKET`: S3 bucket used for processed bugcam output
+- `ACTIVITY_EVENTS_TABLE`: DynamoDB table used for dashboard/backend activity events
 
 ## Development
 

@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+
+{% block title %}S3 Browser - Sensing Garden Admin{% endblock %}
+
+{% block content %}
+<section class="page-header">
+    <h2>S3 Browser</h2>
+    <p class="page-subtitle">Read-only browse for <code>{{ bucket }}</code>.</p>
+</section>
+
+<nav aria-label="S3 path" class="mb-3">
+    {% for crumb in breadcrumbs %}
+    <a href="{{ url_for('view_s3_browser', prefix=crumb.prefix, limit=limit) }}">{{ crumb.label }}</a>{% if not loop.last %} / {% endif %}
+    {% endfor %}
+</nav>
+
+<form method="get" class="filter-panel">
+    <div class="form-row">
+        <div class="form-group col-md-6">
+            <label for="prefix">Prefix</label>
+            <input type="text" class="form-control form-control-sm" id="prefix" name="prefix" value="{{ prefix }}">
+        </div>
+        <div class="form-group col-md-2">
+            <label for="limit">Rows</label>
+            <select class="form-control form-control-sm" id="limit" name="limit">
+                {% for option in ["25", "50", "100", "200"] %}
+                <option value="{{ option }}" {% if limit|string == option %}selected{% endif %}>{{ option }}</option>
+                {% endfor %}
+            </select>
+        </div>
+    </div>
+    <button type="submit" class="btn btn-sm btn-primary">Browse</button>
+    <a href="{{ url_for('view_s3_browser') }}" class="btn btn-sm btn-outline-secondary">Reset</a>
+    {% if prefix %}
+    <a href="{{ url_for('view_s3_browser', prefix=parent_prefix, limit=limit) }}" class="btn btn-sm btn-outline-secondary">Up</a>
+    {% endif %}
+</form>
+
+<div class="table-wrap">
+    <div class="table-responsive">
+        <table class="table table-sm table-hover table-admin">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Size</th>
+                    <th>Last Modified</th>
+                    <th>Action</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for folder in folders %}
+                <tr>
+                    <td><a href="{{ url_for('view_s3_browser', prefix=folder.prefix, limit=limit) }}"><code>{{ folder.name }}</code></a></td>
+                    <td></td>
+                    <td></td>
+                    <td></td>
+                </tr>
+                {% endfor %}
+                {% for file in files %}
+                <tr>
+                    <td><code title="{{ file.key }}">{{ file.name }}</code></td>
+                    <td>{{ file.size_display }}</td>
+                    <td>{{ file.last_modified_display }}</td>
+                    <td><button type="button" class="btn btn-sm btn-outline-primary js-s3-open" data-key="{{ file.key }}">Open</button></td>
+                </tr>
+                {% endfor %}
+                {% if not folders and not files %}
+                <tr><td colspan="4" class="text-muted">No objects found.</td></tr>
+                {% endif %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+{% if next_token %}
+<div class="mt-3">
+    <a class="btn btn-sm btn-primary" href="{{ url_for('view_s3_browser', prefix=prefix, continuation_token=next_token, limit=limit) }}">Next</a>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('click', function(e) {
+    var button = e.target.closest('.js-s3-open');
+    if (!button) return;
+    button.disabled = true;
+    fetch('/api/s3/open?key=' + encodeURIComponent(button.getAttribute('data-key')))
+        .then(function(response) { return response.json(); })
+        .then(function(data) { window.open(data.url, '_blank'); })
+        .finally(function() { button.disabled = false; });
+});
+</script>
+{% endblock %}
