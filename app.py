@@ -816,27 +816,6 @@ def _format_bytes(value: Any) -> str:
     return f"{size:.{precision}f} {units[unit_index]}"
 
 
-def _truncate_identifier(value: Any, prefix: int = 8) -> str:
-    text = str(value or "")
-    if len(text) <= prefix:
-        return text
-    return f"{text[:prefix]}..."
-
-
-def _device_display_names() -> Dict[str, str]:
-    names: Dict[str, str] = {}
-    for item in _all_devices():
-        device_id = str(item.get("device_id") or "")
-        if not device_id:
-            continue
-        for key in ("device_name", "name", "label", "display_name"):
-            candidate = item.get(key)
-            if candidate not in (None, ""):
-                names[device_id] = str(candidate)
-                break
-    return names
-
-
 def _default_export_window() -> tuple[str, str]:
     return ("1970-01-01T00:00:00Z", datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"))
 
@@ -1301,12 +1280,7 @@ def _local_csv_rows(table_name: str) -> List[Dict[str, Any]]:
         rows = _fetch_all_paginated(api.fetch_devices, device_id=device_id, sort_by=sort_by, sort_desc=sort_desc)
         return [_normalize_device_row(item) for item in rows]
     if table_name == "heartbeats":
-        device_names = _device_display_names()
-        rows = [_normalize_heartbeat_row(item) for item in api.fetch_heartbeats().get("items", [])]
-        for item in rows:
-            raw_device_id = str(item.get("device_id") or "")
-            item["device_id"] = device_names.get(raw_device_id, _truncate_identifier(raw_device_id))
-        return rows
+        return [_normalize_heartbeat_row(item) for item in api.fetch_heartbeats().get("items", [])]
     if table_name == "models":
         model_sort_by = sort_by if sort_by != "timestamp" else "last_modified_time"
         rows = _sort_local_rows(list_model_bundles(), model_sort_by, sort_desc)
@@ -1694,12 +1668,9 @@ def view_heartbeats() -> str:
         else:
             response = api.fetch_heartbeats()
             description = "Latest heartbeat per device."
-        device_names = _device_display_names()
         items = [_normalize_heartbeat_row(item) for item in response.get("items", [])]
         for item in items:
-            raw_device_id = str(item.get("device_id") or "")
-            item["_device_id_raw"] = raw_device_id
-            item["device_id"] = device_names.get(raw_device_id, _truncate_identifier(raw_device_id))
+            item["_device_id_raw"] = str(item.get("device_id") or "")
         items = _filter_rows_by_search(items, search_query)
         paged = _local_pagination(items, "view_heartbeats", _get_page(), _get_limit())
         context = _table_context(
