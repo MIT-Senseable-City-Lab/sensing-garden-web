@@ -93,6 +93,9 @@
     <span class="ml-2 text-muted">
         Last seen {{ heartbeat_summary.age or "never" }}{% if heartbeat_summary.last_seen %} · {{ heartbeat_summary.last_seen }}{% endif %}
     </span>
+    <div class="small text-muted mt-1">
+        {{ heartbeat_summary.help_text }}
+    </div>
 </div>
 {% endif %}
 

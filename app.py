@@ -45,7 +45,8 @@ OUTPUT_BUCKET = os.getenv("OUTPUT_BUCKET", "scl-sensing-garden")
 ACTIVITY_EVENTS_TABLE = os.getenv("ACTIVITY_EVENTS_TABLE", "sensing-garden-activity-events")
 MODEL_FILENAME = "model.hef"
 LABELS_FILENAME = "labels.txt"
-HEARTBEAT_ONLINE_THRESHOLD = timedelta(minutes=5)
+HEARTBEAT_ONLINE_THRESHOLD_MINUTES = 5
+HEARTBEAT_ONLINE_THRESHOLD = timedelta(minutes=HEARTBEAT_ONLINE_THRESHOLD_MINUTES)
 DEFAULT_PAGE_LIMIT = 50
 MAX_PAGE_LIMIT = 200
 FETCH_ALL_PAGE_LIMIT = 500
@@ -845,15 +846,17 @@ def _latest_heartbeat_item(items: List[Dict[str, Any]]) -> Optional[Dict[str, An
 
 
 def _heartbeat_summary(device_id: str, items: List[Dict[str, Any]]) -> Dict[str, str]:
+    help_text = f"Offline means no heartbeat in the last {HEARTBEAT_ONLINE_THRESHOLD_MINUTES} minutes."
     latest = _latest_heartbeat_item(items)
     if latest is None:
-        return {"device_id": device_id, "status": "offline", "age": "", "last_seen": ""}
+        return {"device_id": device_id, "status": "offline", "age": "", "last_seen": "", "help_text": help_text}
     timestamp = latest.get("_timestamp_raw")
     return {
         "device_id": device_id,
         "status": _heartbeat_status(_parse_timestamp(timestamp)),
         "age": _format_relative_age(timestamp),
         "last_seen": _format_timestamp(timestamp),
+        "help_text": help_text,
     }
 
 

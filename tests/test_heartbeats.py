@@ -75,6 +75,7 @@ def test_heartbeat_history_shows_device_summary_not_row_status(monkeypatch):
     assert captured == {"device_id": "FLIK2"}
     assert b"Heartbeat History: FLIK2" in response.data
     assert b"All recorded heartbeats for FLIK2." in response.data
+    assert b"Offline means no heartbeat in the last 5 minutes." in response.data
     header_text = b" ".join(re.findall(rb"<th[^>]*>\s*(.*?)\s*</th>", response.data, flags=re.DOTALL))
     assert b"Status" not in header_text.replace(b"DOT Status", b"")
     assert response.data.count(b'<span class="badge badge-online') == 1
