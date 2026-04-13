@@ -26,6 +26,13 @@
         {% if external_url %}
         <a href="{{ external_url }}" target="_blank" rel="noopener noreferrer">Open</a>
         {% endif %}
+    {% elif column.kind == "link" %}
+        {% set link_url = row.get(column.url_key) %}
+        {% if link_url and value %}
+        <a href="{{ link_url }}"><code>{{ value }}</code></a>
+        {% elif value %}
+        <code>{{ value }}</code>
+        {% endif %}
     {% elif column.kind == "badge" %}
         {% if value == "online" %}
         <span class="badge badge-online">online</span>
@@ -75,6 +82,20 @@
 </div>
 {% endif %}
 
+{% if heartbeat_summary %}
+<div class="alert alert-light border" role="status">
+    <strong>{{ heartbeat_summary.device_id }}</strong>
+    {% if heartbeat_summary.status == "online" %}
+    <span class="badge badge-online ml-2">online</span>
+    {% else %}
+    <span class="badge badge-offline ml-2">offline</span>
+    {% endif %}
+    <span class="ml-2 text-muted">
+        Last seen {{ heartbeat_summary.age or "never" }}{% if heartbeat_summary.last_seen %} · {{ heartbeat_summary.last_seen }}{% endif %}
+    </span>
+</div>
+{% endif %}
+
 <form method="get" class="filter-panel">
     <div class="form-row">
         <div class="form-group col-md-3">
@@ -104,7 +125,7 @@
     <div class="form-row">
         <div class="form-group col-md-6 d-flex align-items-end">
             <button type="submit" class="btn btn-sm btn-primary">Apply Filters</button>
-            <a href="{{ url_for(endpoint) }}" class="btn btn-sm btn-outline-secondary">Reset</a>
+            <a href="{{ reset_url }}" class="btn btn-sm btn-outline-secondary">Reset</a>
             {% if export_url %}
             <a href="{{ export_url }}" target="_blank" rel="noopener noreferrer" class="btn btn-sm btn-outline-success ml-2">Download CSV</a>
             {% endif %}

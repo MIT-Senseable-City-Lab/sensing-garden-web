@@ -45,7 +45,7 @@ OUTPUT_BUCKET = os.getenv("OUTPUT_BUCKET", "scl-sensing-garden")
 ACTIVITY_EVENTS_TABLE = os.getenv("ACTIVITY_EVENTS_TABLE", "sensing-garden-activity-events")
 MODEL_FILENAME = "model.hef"
 LABELS_FILENAME = "labels.txt"
-HEARTBEAT_ONLINE_THRESHOLD = timedelta(hours=2)
+HEARTBEAT_ONLINE_THRESHOLD = timedelta(minutes=5)
 DEFAULT_PAGE_LIMIT = 50
 MAX_PAGE_LIMIT = 200
 FETCH_ALL_PAGE_LIMIT = 500
@@ -390,8 +390,19 @@ DEVICE_COLUMNS = [
 ]
 
 HEARTBEAT_COLUMNS = [
-    TableColumn("device_id", "Device ID", sortable=False),
+    TableColumn("device_id", "Device ID", sortable=False, kind="link", url_key="heartbeat_history_url"),
     TableColumn("status", "Status", sortable=False, kind="badge"),
+    TableColumn("timestamp", "Timestamp", sortable=False),
+    TableColumn("age", "Age", sortable=False),
+    TableColumn("cpu_temperature_celsius", "CPU Temp", sortable=False),
+    TableColumn("storage_free_bytes", "Free Bytes", sortable=False),
+    TableColumn("storage_total_bytes", "Total Bytes", sortable=False),
+    TableColumn("uptime_seconds", "Uptime (s)", sortable=False),
+    TableColumn("dot_status", "DOT Status", sortable=False, kind="json"),
+]
+
+HEARTBEAT_HISTORY_COLUMNS = [
+    TableColumn("device_id", "Device ID", sortable=False),
     TableColumn("timestamp", "Timestamp", sortable=False),
     TableColumn("age", "Age", sortable=False),
     TableColumn("cpu_temperature_celsius", "CPU Temp", sortable=False),
@@ -819,6 +830,33 @@ def _format_relative_age(value: Any) -> str:
     return f"{days} {unit} ago"
 
 
+def _heartbeat_status(heartbeat_time: Optional[datetime]) -> str:
+    if heartbeat_time is None:
+        return "offline"
+    age = datetime.now(timezone.utc) - heartbeat_time.astimezone(timezone.utc)
+    return "online" if age <= HEARTBEAT_ONLINE_THRESHOLD else "offline"
+
+
+def _latest_heartbeat_item(items: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not items:
+        return None
+    floor = datetime.min.replace(tzinfo=timezone.utc)
+    return max(items, key=lambda item: _parse_timestamp(item.get("_timestamp_raw")) or floor)
+
+
+def _heartbeat_summary(device_id: str, items: List[Dict[str, Any]]) -> Dict[str, str]:
+    latest = _latest_heartbeat_item(items)
+    if latest is None:
+        return {"device_id": device_id, "status": "offline", "age": "", "last_seen": ""}
+    timestamp = latest.get("_timestamp_raw")
+    return {
+        "device_id": device_id,
+        "status": _heartbeat_status(_parse_timestamp(timestamp)),
+        "age": _format_relative_age(timestamp),
+        "last_seen": _format_timestamp(timestamp),
+    }
+
+
 def _format_bytes(value: Any) -> str:
     if value in (None, ""):
         return ""
@@ -845,6 +883,10 @@ def _build_export_url(table_name: str, *, enabled: bool = True) -> Optional[str]
         if value not in (None, ""):
             params[key] = value
     return url_for("download_csv", **params)
+
+
+def _build_heartbeat_history_export_url(device_id: str) -> str:
+    return url_for("download_csv", table="heartbeats", device_id=device_id)
 
 
 def _stringify_csv_value(value: Any) -> str:
@@ -976,7 +1018,8 @@ def _build_query_url(endpoint: str, **updates: Any) -> str:
             params.pop(key, None)
         else:
             params[key] = str(value)
-    return url_for(endpoint, **params)
+    route_args = request.view_args or {}
+    return url_for(endpoint, **{**route_args, **params})
 
 
 def _token_pagination(next_token: Optional[str], endpoint: str, page: int, token_history: str) -> Dict[str, Any]:
@@ -1076,8 +1119,7 @@ def _normalize_heartbeat_row(item: Dict[str, Any]) -> Dict[str, Any]:
         normalized["status"] = "offline"
         normalized["age"] = ""
     else:
-        age = datetime.now(timezone.utc) - heartbeat_time.astimezone(timezone.utc)
-        normalized["status"] = "online" if age <= HEARTBEAT_ONLINE_THRESHOLD else "offline"
+        normalized["status"] = _heartbeat_status(heartbeat_time)
         normalized["age"] = _format_relative_age(item.get("timestamp"))
     normalized["cpu_temperature_celsius"] = (
         f"{float(item['cpu_temperature_celsius']):.1f}°C"
@@ -1213,6 +1255,7 @@ def _table_context(
     include_extra_columns: bool = True,
     export_url: Optional[str] = None,
     search_query: str = "",
+    heartbeat_summary: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     columns = _visible_columns(columns, rows, include_extra_columns=include_extra_columns)
     return {
@@ -1224,6 +1267,7 @@ def _table_context(
         "sort_by": sort_by,
         "sort_desc": sort_desc,
         "sort_urls": _build_sort_urls(columns, endpoint, sort_by, sort_desc),
+        "reset_url": url_for(endpoint, **(request.view_args or {})),
         "pagination": pagination,
         "filters": filters,
         "count": count,
@@ -1231,6 +1275,7 @@ def _table_context(
         "info_message": info_message,
         "export_url": export_url,
         "search_query": search_query,
+        "heartbeat_summary": heartbeat_summary,
     }
 
 
@@ -1296,7 +1341,7 @@ def _local_csv_rows(table_name: str) -> List[Dict[str, Any]]:
         rows = _fetch_all_paginated(api.fetch_devices, device_id=device_id, sort_by=sort_by, sort_desc=sort_desc)
         return [_normalize_device_row(item) for item in rows]
     if table_name == "heartbeats":
-        return [_normalize_heartbeat_row(item) for item in api.fetch_heartbeats().get("items", [])]
+        return [_normalize_heartbeat_row(item) for item in api.fetch_heartbeats(device_id=device_id or "").get("items", [])]
     if table_name == "models":
         model_sort_by = sort_by if sort_by != "timestamp" else "last_modified_time"
         rows = _sort_local_rows(list_model_bundles(), model_sort_by, sort_desc)
@@ -1676,35 +1721,61 @@ def view_devices() -> str:
 def view_heartbeats() -> str:
     search_query = _get_search_query()
     sort_by, sort_desc = _get_sort("timestamp", True)
-    device_id_filter = request.args.get("device_id", "")
     try:
-        if device_id_filter:
-            response = api.fetch_heartbeats(device_id=device_id_filter)
-            description = f"All heartbeats for {device_id_filter}."
-        else:
-            response = api.fetch_heartbeats()
-            description = "Latest heartbeat per device."
+        response = api.fetch_heartbeats()
         items = [_normalize_heartbeat_row(item) for item in response.get("items", [])]
         for item in items:
-            item["_device_id_raw"] = str(item.get("device_id") or "")
+            device_id = str(item.get("device_id") or "")
+            item["_device_id_raw"] = device_id
+            item["heartbeat_history_url"] = url_for("view_heartbeat_history", device_id=device_id) if device_id else ""
         items = _filter_rows_by_search(items, search_query)
         paged = _local_pagination(items, "view_heartbeats", _get_page(), _get_limit())
         context = _table_context(
             title="Heartbeats",
-            description=description,
+            description="Latest heartbeat per device. Click a device ID to view history.",
             endpoint="view_heartbeats",
             rows=paged["items"],
             columns=HEARTBEAT_COLUMNS,
             sort_by=sort_by,
             sort_desc=sort_desc,
             pagination=paged["pagination"],
-            filters=[
-                {"name": "device_id", "label": "Device ID", "value": device_id_filter, "options": _device_ids()},
-            ],
+            filters=[],
             count=len(paged["items"]),
             total_count=paged["count"],
             export_url=_build_export_url("heartbeats"),
             search_query=search_query,
+        )
+        return render_template("table.html", **context)
+    except Exception as exc:
+        return render_template("error.html", error=str(exc))
+
+
+@app.route("/heartbeats/<device_id>")
+def view_heartbeat_history(device_id: str) -> str:
+    search_query = _get_search_query()
+    sort_by, sort_desc = _get_sort("timestamp", True)
+    try:
+        response = api.fetch_heartbeats(device_id=device_id)
+        items = [_normalize_heartbeat_row(item) for item in response.get("items", [])]
+        summary = _heartbeat_summary(device_id, items)
+        items = _filter_rows_by_search(items, search_query)
+        paged = _local_pagination(items, "view_heartbeat_history", _get_page(), _get_limit())
+        context = _table_context(
+            title=f"Heartbeat History: {device_id}",
+            description=f"All recorded heartbeats for {device_id}.",
+            endpoint="view_heartbeat_history",
+            rows=paged["items"],
+            columns=HEARTBEAT_HISTORY_COLUMNS,
+            sort_by=sort_by,
+            sort_desc=sort_desc,
+            pagination=paged["pagination"],
+            filters=[],
+            count=len(paged["items"]),
+            total_count=paged["count"],
+            include_extra_columns=False,
+            export_url=_build_heartbeat_history_export_url(device_id),
+            search_query=search_query,
+            heartbeat_summary=summary,
         )
         return render_template("table.html", **context)
     except Exception as exc:
