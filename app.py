@@ -683,6 +683,10 @@ def is_s3_image_key(key: str) -> bool:
     return any(key.lower().endswith(extension) for extension in S3_IMAGE_EXTENSIONS)
 
 
+def is_s3_json_key(key: str) -> bool:
+    return key.lower().endswith(".json")
+
+
 def _s3_file_row(item: Dict[str, Any]) -> Dict[str, Any]:
     modified = _s3_object_timestamp(item.get("LastModified"))
     key = str(item["Key"])
@@ -690,6 +694,7 @@ def _s3_file_row(item: Dict[str, Any]) -> Dict[str, Any]:
         "key": key,
         "name": key.rstrip("/").rsplit("/", 1)[-1],
         "is_image": is_s3_image_key(key),
+        "is_json": is_s3_json_key(key),
         "size_bytes": int(item.get("Size", 0)),
         "size_display": _format_bytes(item.get("Size", 0)),
         "last_modified_time": modified,
@@ -758,6 +763,12 @@ def _recent_log_objects(limit: int) -> List[Dict[str, Any]]:
 def _read_s3_text(key: str) -> str:
     response = get_s3_client().get_object(Bucket=OUTPUT_BUCKET, Key=key)
     return response["Body"].read().decode("utf-8")
+
+
+def _read_s3_json(key: str) -> str:
+    if not is_s3_json_key(key):
+        raise ValueError("S3 key must end with .json")
+    return json.dumps(json.loads(_read_s3_text(key)), indent=2, sort_keys=True)
 
 
 def _recent_bugcam_events(limit: int) -> List[ActivityEvent]:
@@ -2158,6 +2169,17 @@ def api_s3_open() -> Response:
         record_s3_activity(ActivityEventType.S3_OPEN, key, f"Opened s3://{OUTPUT_BUCKET}/{key}")
         return jsonify({"url": url})
     except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+
+@app.route("/api/s3/json")
+def api_s3_json() -> Response:
+    try:
+        key = _validate_s3_key(request.args.get("key", ""))
+        text = _read_s3_json(key)
+        record_s3_activity(ActivityEventType.S3_OPEN, key, f"Opened JSON s3://{OUTPUT_BUCKET}/{key}")
+        return jsonify({"key": key, "json": text})
+    except (json.JSONDecodeError, ValueError) as exc:
         return jsonify({"error": str(exc)}), 400
 
 

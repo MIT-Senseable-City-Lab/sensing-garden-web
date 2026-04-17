@@ -42,6 +42,17 @@
         max-height: calc(100vh - 57px);
         object-fit: contain;
     }
+
+    .s3-json-body {
+        max-height: 70vh;
+        overflow: auto;
+        background: #f8f9fa;
+        border: 1px solid #dee2e6;
+        border-radius: 4px;
+        padding: 1rem;
+        white-space: pre-wrap;
+        word-break: break-word;
+    }
 </style>
 {% endblock %}
 
@@ -109,6 +120,9 @@
                         {% if file.is_image %}
                         <button type="button" class="btn btn-sm btn-outline-secondary js-s3-view" data-key="{{ file.key }}" data-title="{{ file.name }}">View</button>
                         {% endif %}
+                        {% if file.is_json %}
+                        <button type="button" class="btn btn-sm btn-outline-secondary js-s3-json" data-key="{{ file.key }}" data-title="{{ file.name }}">View JSON</button>
+                        {% endif %}
                     </td>
                 </tr>
                 {% endfor %}
@@ -141,14 +155,33 @@
         </div>
     </div>
 </div>
+
+<div class="modal fade" id="s3JsonModal" tabindex="-1" role="dialog" aria-hidden="true">
+    <div class="modal-dialog modal-xl" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="s3JsonModalTitle">JSON</h5>
+                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                    <span aria-hidden="true">&times;</span>
+                </button>
+            </div>
+            <div class="modal-body">
+                <pre class="s3-json-body" id="s3JsonModalBody"></pre>
+            </div>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
 <script>
 (function () {
     var s3ImageModal = $('#s3ImageModal');
+    var s3JsonModal = $('#s3JsonModal');
     var s3ImageModalSource = document.getElementById('s3ImageModalSource');
     var s3ImageModalTitle = document.getElementById('s3ImageModalTitle');
+    var s3JsonModalBody = document.getElementById('s3JsonModalBody');
+    var s3JsonModalTitle = document.getElementById('s3JsonModalTitle');
 
     function s3ObjectUrl(key) {
         return fetch('/api/s3/open?key=' + encodeURIComponent(key))
@@ -163,6 +196,24 @@
                     throw new Error('S3 open response missing url');
                 }
                 return data.url;
+            });
+    }
+
+    function s3Json(key) {
+        return fetch('/api/s3/json?key=' + encodeURIComponent(key))
+            .then(function(response) {
+                return response.json().then(function(data) {
+                    if (!response.ok) {
+                        throw new Error(data.error || 'S3 JSON open failed');
+                    }
+                    return data;
+                });
+            })
+            .then(function(data) {
+                if (!data.json) {
+                    throw new Error('S3 JSON response missing json');
+                }
+                return data.json;
             });
     }
 
@@ -193,11 +244,33 @@
                         s3ImageModal.modal('show');
                     });
             });
+            return;
+        }
+
+        var jsonButton = e.target.closest('.js-s3-json');
+        if (jsonButton) {
+            withDisabled(jsonButton, function() {
+                var title = jsonButton.getAttribute('data-title');
+                s3JsonModalTitle.textContent = title;
+                s3JsonModalBody.textContent = 'Loading...';
+                s3JsonModal.modal('show');
+                return s3Json(jsonButton.getAttribute('data-key'))
+                    .then(function(jsonText) {
+                        s3JsonModalBody.textContent = jsonText;
+                    })
+                    .catch(function(error) {
+                        s3JsonModalBody.textContent = error.message;
+                    });
+            });
         }
     });
 
     s3ImageModal.on('hidden.bs.modal', function () {
         s3ImageModalSource.removeAttribute('src');
+    });
+
+    s3JsonModal.on('hidden.bs.modal', function () {
+        s3JsonModalBody.textContent = '';
     });
 }());
 </script>
